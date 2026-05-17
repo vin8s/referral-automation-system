@@ -25,18 +25,18 @@ export const currentUser: CurrentUser = {
 export const referrals: Referral[] = [
   {
     id: 'REF-1042',
-    patient: { name: 'James Okafor', age: 67, sex: 'M', phone: '(415) 555-0173', language: 'English', insurance: 'Medicare' },
+    patient: { name: 'James Okafor', age: 67, sex: 'M', dateOfBirth: '03/12/1959', phone: '+19197577586', language: 'English', insurance: 'Medicare' },
     reason: 'AFib follow-up',
     referringProvider: 'Dr. Chen',
     referralSource: 'Bay Cardiology — internal',
     referralTime: 'Apr 14, 8:21 AM',
     location: 'Mission Bay',
     priority: 'normal',
-    state: 'Slot accepted',
+    state: 'Pending Confirmation',
     capturedSlot: { day: 'Tue Apr 22', time: '2:15pm', provider: 'Dr. Park', capturedAgoMin: 11 },
     attempts: [
-      { n: 1, timestamp: 'Apr 14, 9:02 AM', channel: 'voice', outcome: 'no_answer', duration: '0:00', disclosurePlayed: false, summary: 'No answer, no voicemail left.', transcript: [] },
-      { n: 2, timestamp: 'Apr 14, 1:40 PM', channel: 'voice', outcome: 'accepted', duration: '3:24', disclosurePlayed: true,
+      { n: 1, timestamp: 'Apr 14, 9:02 AM', channel: 'voice', outcome: 'No Answer', duration: '0:00', disclosurePlayed: false, summary: 'No answer, no voicemail left.', transcript: [] },
+      { n: 2, timestamp: 'Apr 14, 1:40 PM', channel: 'voice', outcome: 'Appointment Accepted', duration: '3:24', disclosurePlayed: true,
         summary: 'Patient reached. AI explained AFib referral and resolved cost concern by confirming Medicare coverage. Patient accepted Tue Apr 22 at 2:15pm with Dr. Park.',
         transcript: [
           { who: 'ai', text: 'Hi, this is an automated assistant calling on behalf of Bay Cardiology. Is this James?' },
@@ -55,17 +55,17 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1039',
-    patient: { name: 'Robert Klein', age: 72, sex: 'M', phone: '(415) 555-0148', language: 'English', insurance: 'Medicare' },
+    patient: { name: 'Robert Klein', age: 72, sex: 'M', dateOfBirth: '01/08/1954', phone: '+13604815266', language: 'English', insurance: 'Medicare' },
     reason: 'Post-MI follow-up',
     referringProvider: 'SF General — discharge',
     referralSource: 'SF General — discharge',
     referralTime: 'Apr 13, 4:55 PM',
     location: 'Mission Bay',
     priority: 'urgent',
-    state: 'Slot accepted',
+    state: 'Pending Confirmation',
     capturedSlot: { day: 'Mon Apr 21', time: '11:30am', provider: 'Dr. Park', capturedAgoMin: 38 },
     attempts: [
-      { n: 1, timestamp: 'Apr 14, 8:30 AM', channel: 'voice', outcome: 'accepted', duration: '4:01', disclosurePlayed: true,
+      { n: 1, timestamp: 'Apr 14, 8:30 AM', channel: 'voice', outcome: 'Appointment Accepted', duration: '4:01', disclosurePlayed: true,
         summary: 'Post-MI discharge referral. Patient anxious about returning so soon; AI reassured and secured Mon Apr 21 11:30am with Dr. Park.',
         transcript: [
           { who: 'ai', text: 'Hi, this is an automated assistant for Bay Cardiology. Am I speaking with Robert?' },
@@ -83,24 +83,24 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1051',
-    patient: { name: 'Maria Delgado', age: 58, sex: 'F', phone: '(415) 555-0192', language: 'Spanish', insurance: 'Blue Shield PPO' },
+    patient: { name: 'Maria Delgado', age: 58, sex: 'F', dateOfBirth: '07/22/1968', phone: '+19197577586', language: 'Spanish', insurance: 'Blue Shield PPO' },
     reason: 'New murmur, echo recommended',
     referringProvider: 'Dr. Alvarez (PCP)',
     referralSource: 'Fax — Alvarez Family Medicine',
     referralTime: 'Apr 14, 7:10 AM',
     location: 'Mission Bay',
     priority: 'normal',
-    state: 'Outreach',
+    state: 'In Progress',
     capturedSlot: null,
     attempts: [
-      { n: 1, timestamp: 'Apr 14, 10:15 AM', channel: 'voice', outcome: 'voicemail', duration: '0:38', disclosurePlayed: true, summary: 'Voicemail left (practice + callback only, no clinical detail). SMS fallback triggered in Spanish.', transcript: [{ who: 'ai', text: 'Hello, this is a message from Bay Cardiology. Please call us back at your convenience. Thank you.' }] },
-      { n: 2, timestamp: 'Apr 14, 10:16 AM', channel: 'sms', outcome: 'no_answer', duration: '—', disclosurePlayed: false, summary: 'SMS sent in Spanish with callback link. Awaiting response.', transcript: [] },
+      { n: 1, timestamp: 'Apr 14, 10:15 AM', channel: 'voice', outcome: 'Voicemail Left', duration: '0:38', disclosurePlayed: true, summary: 'Voicemail left (practice + callback only, no clinical detail). SMS fallback triggered in Spanish.', transcript: [{ who: 'ai', text: 'Hello, this is a message from Bay Cardiology. Please call us back at your convenience. Thank you.' }] },
+      { n: 2, timestamp: 'Apr 14, 10:16 AM', channel: 'sms', outcome: 'No Answer', duration: '—', disclosurePlayed: false, summary: 'SMS sent in Spanish with callback link. Awaiting response.', transcript: [] },
     ],
     audit: [{ at: 'Apr 14, 10:16 AM', who: 'System', what: 'SMS fallback (es) sent' }],
   },
   {
     id: 'REF-1047',
-    patient: { name: 'Walter Briggs', age: 64, sex: 'M', phone: '(415) 555-0110', language: 'English', insurance: 'Aetna' },
+    patient: { name: 'Walter Briggs', age: 64, sex: 'M', dateOfBirth: '09/03/1962', phone: '+13604815266', language: 'English', insurance: 'Aetna' },
     reason: 'Chest pain, urgent eval',
     referringProvider: 'Dr. Chen',
     referralSource: 'Bay Cardiology — internal',
@@ -111,7 +111,7 @@ export const referrals: Referral[] = [
     escalation: { reason: 'Patient reported active chest pain during the call', severity: 'high', raisedAt: 'Apr 14, 9:48 AM', owner: null },
     capturedSlot: null,
     attempts: [
-      { n: 1, timestamp: 'Apr 14, 9:46 AM', channel: 'voice', outcome: 'escalated', duration: '1:12', disclosurePlayed: true,
+      { n: 1, timestamp: 'Apr 14, 9:46 AM', channel: 'voice', outcome: 'Escalated', duration: '1:12', disclosurePlayed: true,
         summary: 'ESCALATED: patient described chest pain currently. AI stopped scheduling, advised it could not give medical guidance, and flagged for immediate human callback.',
         transcript: [
           { who: 'ai', text: 'Hi, this is an automated assistant for Bay Cardiology calling about a referral from Dr. Chen.' },
@@ -125,7 +125,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1033',
-    patient: { name: 'Yuki Tanaka', age: 51, sex: 'F', phone: '(415) 555-0166', language: 'English', insurance: 'Kaiser' },
+    patient: { name: 'Yuki Tanaka', age: 51, sex: 'F', dateOfBirth: '04/15/1975', phone: '+19197577586', language: 'English', insurance: 'Kaiser' },
     reason: 'Palpitations workup',
     referringProvider: 'Dr. Osei (PCP)',
     referralSource: 'EHR feed',
@@ -136,7 +136,7 @@ export const referrals: Referral[] = [
     capturedSlot: { day: 'Thu Apr 17', time: '9:00am', provider: 'Dr. Lin', capturedAgoMin: null },
     bookedAppointment: { day: 'Thu Apr 17', time: '9:00am', provider: 'Dr. Lin', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 13, 11:05 AM', mirrorStatus: 'mirrored' },
     attempts: [
-      { n: 1, timestamp: 'Apr 13, 10:50 AM', channel: 'voice', outcome: 'connected', duration: '2:48', disclosurePlayed: true,
+      { n: 1, timestamp: 'Apr 13, 10:50 AM', channel: 'voice', outcome: 'Appointment Accepted', duration: '2:48', disclosurePlayed: true,
         summary: 'Patient accepted Thu Apr 17 9:00am with Dr. Lin. MA confirmed in practice system; mirrored to shadow calendar.',
         transcript: [
           { who: 'ai', text: 'Hi, this is an automated assistant for Bay Cardiology. Is this Yuki?' },
@@ -156,7 +156,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1058',
-    patient: { name: 'Grace Mwangi', age: 45, sex: 'F', phone: '(415) 555-0204', language: 'English', insurance: 'United PPO' },
+    patient: { name: 'Grace Mwangi', age: 45, sex: 'F', dateOfBirth: '02/28/1981', phone: '+13604815266', language: 'English', insurance: 'United PPO' },
     reason: 'Hypertension referral',
     referringProvider: 'Dr. Alvarez (PCP)',
     referralSource: 'Fax — Alvarez Family Medicine',
@@ -170,7 +170,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1059',
-    patient: { name: 'Daniel Reyes', age: 60, sex: 'M', phone: '(415) 555-0211', language: 'English', insurance: 'Medicare' },
+    patient: { name: 'Daniel Reyes', age: 60, sex: 'M', dateOfBirth: '11/11/1966', phone: '+19197577586', language: 'English', insurance: 'Medicare' },
     reason: 'Pre-op cardiac clearance',
     referringProvider: 'Ortho — Dr. Singh',
     referralSource: 'Referral platform',
@@ -184,7 +184,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1061',
-    patient: { name: 'Helen Park', age: 69, sex: 'F', phone: '(415) 555-0220', language: 'Korean', insurance: 'Medicare Advantage' },
+    patient: { name: 'Helen Park', age: 69, sex: 'F', dateOfBirth: '06/30/1957', phone: '+13604815266', language: 'Korean', insurance: 'Medicare Advantage' },
     reason: 'Heart failure follow-up',
     referringProvider: 'SF General — discharge',
     referralSource: 'SF General — discharge',
@@ -198,7 +198,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1062',
-    patient: { name: 'Marcus Hill', age: 55, sex: 'M', phone: '(415) 555-0231', language: 'English', insurance: 'Cigna' },
+    patient: { name: 'Marcus Hill', age: 55, sex: 'M', dateOfBirth: '08/19/1971', phone: '+19197577586', language: 'English', insurance: 'Cigna' },
     reason: 'Abnormal EKG',
     referringProvider: 'Dr. Osei (PCP)',
     referralSource: 'EHR feed',
@@ -213,55 +213,17 @@ export const referrals: Referral[] = [
   // Outreach referrals (fill to keep pipeline counts realistic)
   ...(['Linda Brown','Omar Farah','Nina Petrov','Carl Jensen','Aisha Bello','Tom Whitaker','Sara Kim','Luis Mendez','Ruth Cohen','Ben Adler'] as const).map((name, i): Referral => ({
     id: `REF-10${70 + i}`,
-    patient: { name, age: 50 + (i % 30), sex: i % 2 === 0 ? 'F' : 'M', phone: `(415) 555-0${300 + i}`, language: ['English','Spanish','English','English','English','Mandarin','English','English','English','English'][i], insurance: ['Medicare','Aetna','Blue Shield PPO','United PPO','Kaiser','Cigna','Medicare Advantage','Medicare','Aetna','Blue Shield PPO'][i] },
+    patient: { name, age: 50 + (i % 30), sex: i % 2 === 0 ? 'F' : 'M', dateOfBirth: ['05/14/1976','12/02/1975','03/07/1974','10/17/1973','06/22/1972','01/08/1971','08/30/1970','04/04/1969','09/15/1968','02/27/1967'][i], phone: i % 2 === 0 ? '+13604815266' : '+19197577586', language: ['English','Spanish','English','English','English','Mandarin','English','English','English','English'][i], insurance: ['Medicare','Aetna','Blue Shield PPO','United PPO','Kaiser','Cigna','Medicare Advantage','Medicare','Aetna','Blue Shield PPO'][i] },
     reason: ['Arrhythmia eval','Syncope workup','Valve follow-up','Chest pain eval','Lipid management','Pacemaker check','Cardiomyopathy f/u','Hypertension referral','Palpitations','Stress test'][i],
     referringProvider: ['Dr. Chen','Dr. Alvarez (PCP)','Dr. Osei (PCP)','SF General — discharge','Dr. Chen','Dr. Alvarez (PCP)','Dr. Osei (PCP)','SF General — discharge','Dr. Chen','Dr. Alvarez (PCP)'][i],
     referralSource: 'EHR feed',
     referralTime: `Apr ${10 + (i % 5)}, ${8 + (i % 6)}:00 AM`,
     location: 'Mission Bay',
     priority: i % 6 === 0 ? 'urgent' : 'normal',
-    state: 'Outreach',
+    state: 'In Progress',
     capturedSlot: null,
-    attempts: [{ n: 1, timestamp: `Apr ${11 + (i % 4)}, 9:00 AM`, channel: i % 3 === 0 ? 'sms' : 'voice', outcome: i % 3 === 1 ? 'voicemail' : 'no_answer', duration: i % 3 === 1 ? '0:31' : '0:00', disclosurePlayed: i % 3 === 1, summary: i % 3 === 1 ? 'Voicemail left; SMS fallback queued.' : 'No answer; next attempt scheduled.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: `Apr ${11 + (i % 4)}, 9:00 AM`, channel: i % 3 === 0 ? 'sms' : 'voice', outcome: i % 3 === 1 ? 'Voicemail Left' : 'No Answer', duration: i % 3 === 1 ? '0:31' : '0:00', disclosurePlayed: i % 3 === 1, summary: i % 3 === 1 ? 'Voicemail left; SMS fallback queued.' : 'No answer; next attempt scheduled.', transcript: [] }],
     audit: [{ at: 'auto', who: 'System', what: 'In cadence' }],
-  })),
-  // Closed-won
-  ...(['Evelyn Carter','Sam Ortega','Rebecca Lin','George Bauer'] as const).map((name, i): Referral => ({
-    id: `REF-100${i + 1}`,
-    patient: { name, age: 60 + i * 2, sex: i % 2 === 0 ? 'F' : 'M', phone: `(415) 555-04${10 + i}`, language: 'English', insurance: ['Medicare','Aetna','Kaiser','Medicare'][i] },
-    reason: ['AFib follow-up','Post-MI follow-up','Palpitations workup','Valve follow-up'][i],
-    referringProvider: ['Dr. Chen','SF General — discharge','Dr. Osei (PCP)','Dr. Chen'][i],
-    referralSource: ['Bay Cardiology — internal','SF General — discharge','EHR feed','Bay Cardiology — internal'][i],
-    referralTime: `Apr ${5 + i}, 9:15 AM`,
-    location: 'Mission Bay',
-    priority: 'normal',
-    state: 'Closed-won',
-    capturedSlot: { day: `Apr ${8 + i}`, time: '10:00am', provider: 'Dr. Lin', capturedAgoMin: null },
-    bookedAppointment: { day: `Apr ${8 + i}`, time: '10:00am', provider: 'Dr. Lin', confirmedBy: 'Priya Anand', confirmedAt: `Apr ${6 + i}, 2:00 PM`, mirrorStatus: 'mirrored' },
-    visitCompletedAt: `Apr ${8 + i}, 10:42 AM`,
-    closedLoopSent: true,
-    attempts: [{ n: 1, timestamp: `Apr ${6 + i}, 1:50 PM`, channel: 'voice', outcome: 'connected', duration: '2:30', disclosurePlayed: true, summary: 'Completed visit; closed-loop summary sent to referring provider.', transcript: [] }],
-    audit: [
-      { at: `Apr ${6 + i}, 2:00 PM`, who: 'Priya Anand', what: 'Confirmed in practice system' },
-      { at: `Apr ${8 + i}, 10:42 AM`, who: 'System', what: 'Visit completed → Closed-won' },
-    ],
-  })),
-  // Closed-lost
-  ...(['Patricia Nolan','Victor Shaw','Dana Lemke'] as const).map((name, i): Referral => ({
-    id: `REF-099${i + 1}`,
-    patient: { name, age: 58 + i * 3, sex: i % 2 === 0 ? 'F' : 'M', phone: `(415) 555-05${10 + i}`, language: 'English', insurance: ['Medicare','United PPO','Aetna'][i] },
-    reason: ['Hypertension referral','Arrhythmia eval','Lipid management'][i],
-    referringProvider: ['Dr. Alvarez (PCP)','Dr. Osei (PCP)','Dr. Chen'][i],
-    referralSource: ['Fax — Alvarez Family Medicine','EHR feed','Bay Cardiology — internal'][i],
-    referralTime: `Apr ${2 + i}, 8:00 AM`,
-    location: 'Mission Bay',
-    priority: 'normal',
-    state: 'Closed-lost',
-    closedReason: ['Cadence exhausted — no contact after 6 attempts','Patient declined — using another cardiologist','Cadence exhausted — voicemail only'][i],
-    reactivationEligible: true,
-    capturedSlot: null,
-    attempts: [{ n: 6, timestamp: `Apr ${4 + i}, 4:00 PM`, channel: 'sms', outcome: 'no_answer', duration: '—', disclosurePlayed: false, summary: 'Final attempt; cadence exhausted.', transcript: [] }],
-    audit: [{ at: `Apr ${4 + i}, 4:05 PM`, who: 'System', what: 'Closed-lost (re-activatable)' }],
   })),
 ];
 
@@ -270,7 +232,7 @@ export const analytics: Analytics = {
   funnel: [
     { stage: 'Referrals received', count: 412 },
     { stage: 'Contacted', count: 351 },
-    { stage: 'Slot accepted', count: 188 },
+    { stage: 'Pending Confirmation', count: 188 },
     { stage: 'Confirmed (booked)', count: 171 },
     { stage: 'Visit completed', count: 154 },
   ],
@@ -300,14 +262,23 @@ export const analytics: Analytics = {
 
 export const dashboardCallActivity = {
   window: 'last 24h · vs. typical day',
+  avgTimeToFirstAttemptMin: 17,
   metrics: [
-    { label: 'Calls made', value: 142, delta: '+18', deltaDir: 'up' as const },
-    { label: 'Connected', value: 61, sub: '43% pickup' },
-    { label: 'Slots captured', value: 14, delta: '+4', deltaDir: 'up' as const },
-    { label: 'Confirmations', value: 11, sub: '3 in queue' },
-    { label: 'No-answers', value: 63, delta: '−7', deltaDir: 'down' as const },
+    { label: 'Calls made',    value: 142, delta: '+18', deltaDir: 'up'   as const, cardDelta: '+18 vs. typical', spark: [80, 92, 88, 110, 98, 120, 134, 142] },
+    { label: 'Connected',     value: 61,  sub: '43% pickup',                        cardDelta: '43% pickup · steady', spark: [40, 42, 48, 50, 55, 58, 56, 61] },
+    { label: 'Slots captured',value: 14,  delta: '+4',  deltaDir: 'up'   as const, cardDelta: '+4 vs. typical', spark: [6, 7, 9, 8, 10, 11, 13, 14] },
+    { label: 'Confirmations', value: 11,  sub: '3 in queue',                        cardDelta: '3 in queue', spark: [4, 5, 7, 8, 8, 9, 10, 11] },
+    { label: 'No-answers',    value: 63,  delta: '−7',  deltaDir: 'down' as const, cardDelta: '−7 vs. typical', spark: [78, 72, 70, 68, 65, 64, 65, 63] },
   ],
 };
+
+export const dashboardFunnel = [
+  { label: 'Queued',        n: 38, conv: null as null },
+  { label: 'Contacted',     n: 27, conv: 71 },
+  { label: 'Pending Confirmation', n: 14, conv: 52 },
+  { label: 'Confirmed',     n: 11, conv: 79 },
+  { label: 'Completed',     n: 9,  conv: 82 },
+];
 
 export const settingsDefaults = {
   cadence: {

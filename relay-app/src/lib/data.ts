@@ -8,12 +8,13 @@ import {
   currentUser as _currentUser,
   analytics as _analytics,
   dashboardCallActivity as _callActivity,
+  dashboardFunnel as _dashboardFunnel,
   settingsDefaults as _settings,
 } from './mockData';
 import type {
-  Referral, ReferralState, ConfirmQueueItem, UrgentAlert,
+  Referral, ReferralState, Attempt, ConfirmQueueItem, UrgentAlert,
   CallLogEntry, CalendarEvent, PipelineCount, Analytics,
-  Org, CurrentUser,
+  Org, CurrentUser, DashboardFunnelStep, DashboardHealthSignals,
 } from './types';
 
 // Internal mutable state for prototype interactions (confirm, reject, etc.)
@@ -44,14 +45,14 @@ export async function getReferralById(id: string): Promise<Referral | null> {
 }
 
 export async function getReferralsInMotion(): Promise<Referral[]> {
-  return delay(_state.filter(r => !['Closed-won', 'Closed-lost'].includes(r.state)));
+  return delay([..._state]);
 }
 
 // ── Confirm queue (MA action queue) ──────────────────────────────────────
 
 export async function getConfirmQueue(): Promise<ConfirmQueueItem[]> {
   const items = _state
-    .filter(r => r.state === 'Slot accepted' && r.capturedSlot)
+    .filter(r => r.state === 'Pending Confirmation' && r.capturedSlot)
     .map(r => ({
       referralId: r.id,
       patient: r.patient.name,
@@ -90,7 +91,7 @@ export async function rejectSlot(referralId: string): Promise<{ success: boolean
     if (r.id !== referralId) return r;
     return {
       ...r,
-      state: 'Outreach' as ReferralState,
+      state: 'In Progress' as ReferralState,
       capturedSlot: null,
       audit: [...r.audit, { at: 'just now', who: _currentUser.fullName, what: 'Slot rejected — re-entering outreach (prototype)' }],
     };
@@ -138,7 +139,7 @@ export async function getCallLog(): Promise<CallLogEntry[]> {
       duration: a.duration,
       summary: a.summary,
       hasTranscript: a.transcript.length > 0,
-      escalated: a.outcome === 'escalated',
+      escalated: a.outcome === 'Escalated',
       disclosurePlayed: a.disclosurePlayed,
     }))
   );
@@ -149,7 +150,7 @@ export async function getCallLog(): Promise<CallLogEntry[]> {
 
 export async function getCalendarEvents(): Promise<CalendarEvent[]> {
   const events = _state
-    .filter(r => r.bookedAppointment)
+    .filter(r => r.bookedAppointment && r.state === 'Booked')
     .map(r => ({
       referralId: r.id,
       patient: r.patient.name,
@@ -165,7 +166,7 @@ export async function getCalendarEvents(): Promise<CalendarEvent[]> {
 // ── Pipeline / analytics ───────────────────────────────────────────────────
 
 export async function getPipeline(): Promise<PipelineCount[]> {
-  const states: ReferralState[] = ['Queued','Outreach','Slot accepted','Booked','Escalated','Closed-won','Closed-lost'];
+  const states: ReferralState[] = ['Queued','In Progress','Pending Confirmation','Booked','Escalated'];
   return delay(states.map(s => ({ state: s, count: _state.filter(r => r.state === s).length })));
 }
 
@@ -188,7 +189,61 @@ export async function getSettings() {
 export async function getSidebarCounts(): Promise<{ urgentAlerts: number; confirmQueue: number; referrals: number }> {
   return delay({
     urgentAlerts: _state.filter(r => r.state === 'Escalated').length,
-    confirmQueue: _state.filter(r => r.state === 'Slot accepted').length,
-    referrals: _state.filter(r => !['Closed-won', 'Closed-lost'].includes(r.state)).length,
+    confirmQueue: _state.filter(r => r.state === 'Pending Confirmation').length,
+    referrals: _state.length,
+  });
+}
+
+export async function updateReferralState(
+  referralId: string,
+  newState: ReferralState,
+): Promise<{ success: boolean }> {
+  const now = new Date().toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+  _state = _state.map(r => {
+    if (r.id !== referralId) return r;
+    return {
+      ...r,
+      state: newState,
+      audit: [...r.audit, { at: now, who: _currentUser.fullName, what: `State manually updated to ${newState}` }],
+    };
+  });
+  return delay({ success: true });
+}
+
+export async function addCallAttempt(
+  referralId: string,
+  attempt: Omit<Attempt, 'n'>,
+): Promise<{ success: boolean }> {
+  _state = _state.map(r => {
+    if (r.id !== referralId) return r;
+    const n = r.attempts.length + 1;
+    return {
+      ...r,
+      attempts: [...r.attempts, { ...attempt, n }],
+      audit: [...r.audit, {
+        at: attempt.timestamp,
+        who: 'Manual call',
+        what: `Voice call: ${attempt.outcome} · ${attempt.duration}`,
+      }],
+    };
+  });
+  return delay({ success: true });
+}
+
+export async function getDashboardFunnel(): Promise<DashboardFunnelStep[]> {
+  return delay([..._dashboardFunnel]);
+}
+
+export async function getDashboardHealthSignals(): Promise<DashboardHealthSignals> {
+  return delay({
+    status: 'normal' as const,
+    disclosureRatePct: _analytics.compliance.aiDisclosureRate,
+    quietHoursAdherencePct: _analytics.compliance.quietHourAdherence,
+    avgTimeToFirstAttemptMin: _callActivity.avgTimeToFirstAttemptMin,
+    escalationsTriggered: _state.filter(r => r.state === 'Escalated').length,
+    shadowCalendarFidelityPct: _analytics.shadowFidelity.currentPct,
+    optOutsHonored: _analytics.compliance.optOutsHonored,
   });
 }

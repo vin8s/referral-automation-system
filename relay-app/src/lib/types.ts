@@ -2,24 +2,28 @@
 // State names match REFERRAL_STATUSES.md exactly.
 
 export type ReferralState =
-  | 'Ingested'
   | 'Queued'
-  | 'Outreach'
-  | 'Slot accepted'
+  | 'In Progress'
+  | 'Pending Confirmation'
   | 'Booked'
-  | 'Escalated'
-  | 'Closed-won'
-  | 'Closed-lost';
+  | 'Escalated';
 
 export type Priority = 'urgent' | 'normal';
 export type Channel = 'voice' | 'sms';
-export type AttemptOutcome =
-  | 'connected'
-  | 'voicemail'
-  | 'no_answer'
-  | 'escalated'
-  | 'declined'
-  | 'accepted';
+export type CallOutcome =
+  | 'No Answer'
+  | 'Voicemail Left'
+  | 'Call Back Requested'
+  | 'Identity Verified'
+  | 'Interested'
+  | 'Appointment Accepted'
+  | 'Booked'
+  | 'Transferred to Staff'
+  | 'Declined Referral'
+  | 'Wrong Number'
+  | 'Language Barrier'
+  | 'Disconnected'
+  | 'Escalated';
 
 export interface TranscriptTurn {
   who: 'ai' | 'patient';
@@ -30,7 +34,7 @@ export interface Attempt {
   n: number;
   timestamp: string;
   channel: Channel;
-  outcome: AttemptOutcome;
+  outcome: CallOutcome;
   duration: string;
   disclosurePlayed: boolean;
   summary: string;
@@ -63,6 +67,7 @@ export interface Patient {
   name: string;
   age: number;
   sex: 'M' | 'F';
+  dateOfBirth: string;
   phone: string;
   language: string;
   insurance: string;
@@ -88,10 +93,6 @@ export interface Referral {
   capturedSlot: CapturedSlot | null;
   bookedAppointment?: BookedAppointment;
   escalation?: Escalation;
-  visitCompletedAt?: string;
-  closedLoopSent?: boolean;
-  closedReason?: string;
-  reactivationEligible?: boolean;
   attempts: Attempt[];
   audit: AuditEntry[];
 }
@@ -130,7 +131,7 @@ export interface CallLogEntry {
   timestamp: string;
   attempt: number;
   channel: Channel;
-  outcome: AttemptOutcome;
+  outcome: CallOutcome;
   duration: string;
   summary: string;
   hasTranscript: boolean;
@@ -194,4 +195,53 @@ export interface CurrentUser {
   role: string;
   initials: string;
   today: string;
+}
+
+export interface DashboardCallMetric {
+  label: string;
+  value: number;
+  delta?: string;
+  deltaDir?: 'up' | 'down';
+  sub?: string;
+  spark?: number[];
+  cardDelta?: string;
+}
+
+export interface DashboardFunnelStep {
+  label: string;
+  n: number;
+  conv: number | null;
+}
+
+export interface DashboardHealthSignals {
+  status: 'normal' | 'degraded' | 'down';
+  disclosureRatePct: number;
+  quietHoursAdherencePct: number;
+  avgTimeToFirstAttemptMin: number;
+  escalationsTriggered: number;
+  shadowCalendarFidelityPct: number;
+  optOutsHonored: number;
+}
+
+// ── ElevenLabs Conversational AI call types ───────────────────────────────────
+export interface ElevenLabsTranscriptTurn {
+  role: 'agent' | 'user';
+  message: string;
+  time_in_call_secs?: number;
+}
+
+export interface ElevenLabsCallResult {
+  conversation_id: string;
+  status: 'processing' | 'done' | 'failed';
+  transcript?: ElevenLabsTranscriptTurn[];
+  metadata?: {
+    call_duration_secs?: number;
+    start_time_unix_secs?: number;
+    termination_reason?: string;
+  };
+  analysis?: {
+    call_successful?: 'success' | 'failure' | 'unknown';
+    transcript_summary?: string;
+    data_collection_results?: Record<string, { value: unknown; rationale: string }>;
+  };
 }

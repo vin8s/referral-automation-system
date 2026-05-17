@@ -1,34 +1,39 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { PageHead } from '@/components/layout/PageHead';
-import { StatePill } from '@/components/shared/StatePill';
-import { Avatar } from '@/components/shared/Avatar';
 import { Icon } from '@/components/shared/Icon';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { getReferrals } from '@/lib/data';
+import { StatePicker } from '@/components/shared/StatePicker';
 import type { Referral, ReferralState } from '@/lib/types';
 
-const STATE_FILTERS: Array<{ value: string; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'Outreach', label: 'Outreach active' },
-  { value: 'Slot accepted', label: 'Slot accepted' },
-  { value: 'Booked', label: 'Booked' },
-  { value: 'Queued', label: 'Queued' },
-  { value: 'Escalated', label: 'Escalated' },
+const STATE_FILTERS = [
+  { value: 'all',                  label: 'All' },
+  { value: 'Queued',               label: 'Queued' },
+  { value: 'In Progress',          label: 'In Progress' },
+  { value: 'Pending Confirmation', label: 'Pending Confirmation' },
+  { value: 'Booked',               label: 'Booked' },
+  { value: 'Escalated',            label: 'Escalated' },
 ];
 
+// ── Referrals page ────────────────────────────────────────────────────────────
 export default function ReferralsPage() {
+  const router = useRouter();
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [stateFilter, setStateFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'id', dir: 'desc' });
 
-  useEffect(() => {
-    getReferrals().then(setReferrals);
-  }, []);
+  useEffect(() => { getReferrals().then(setReferrals); }, []);
+
+  function handleStateChange(referralId: string, next: ReferralState) {
+    setReferrals(prev =>
+      prev.map(r => r.id === referralId ? { ...r, state: next } : r)
+    );
+  }
 
   const filtered = useMemo(() => {
     let rows = referrals;
@@ -45,8 +50,8 @@ export default function ReferralsPage() {
     }
     return [...rows].sort((a, b) => {
       const dir = sort.dir === 'asc' ? 1 : -1;
-      if (sort.col === 'id') return a.id > b.id ? dir : -dir;
-      if (sort.col === 'state') return a.state > b.state ? dir : -dir;
+      if (sort.col === 'id')      return a.id > b.id ? dir : -dir;
+      if (sort.col === 'state')   return a.state > b.state ? dir : -dir;
       if (sort.col === 'patient') return a.patient.name > b.patient.name ? dir : -dir;
       return 0;
     });
@@ -71,17 +76,24 @@ export default function ReferralsPage() {
 
   return (
     <>
-      <PageHead
-        title="Referrals"
-        sub={`${filtered.length} of ${referrals.length} referrals`}
-      >
+      <PageHead title="Referrals" sub={`${filtered.length} of ${referrals.length} referrals`}>
         <button className="btn btn-sm"><Icon name="download" size={12} /> Export</button>
         <button className="btn btn-sm btn-primary"><Icon name="upload" size={12} /> Ingest</button>
       </PageHead>
 
       {/* Filter bar */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, padding: '10px 14px', background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)', borderRadius: 'var(--relay-radius) var(--relay-radius) 0 0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 9px', background: 'var(--relay-tint)', border: '1px solid var(--relay-hairline)', borderRadius: 7, maxWidth: 280, flex: '0 1 280px' }}>
+      <div style={{
+        display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+        marginBottom: 12, padding: '10px 14px',
+        background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
+        borderRadius: 'var(--relay-radius) var(--relay-radius) 0 0',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          padding: '5px 9px', background: 'var(--relay-tint)',
+          border: '1px solid var(--relay-hairline)', borderRadius: 7,
+          maxWidth: 280, flex: '0 1 280px',
+        }}>
           <Icon name="search" size={13} />
           <input
             value={search}
@@ -91,19 +103,12 @@ export default function ReferralsPage() {
           />
         </div>
         {STATE_FILTERS.map(f => (
-          <button
-            key={f.value}
-            className={`chip${stateFilter === f.value ? ' active' : ''}`}
-            onClick={() => setStateFilter(f.value)}
-          >
+          <button key={f.value} className={`chip${stateFilter === f.value ? ' active' : ''}`} onClick={() => setStateFilter(f.value)}>
             {f.label}
           </button>
         ))}
         <span style={{ color: 'var(--relay-ink-4)', fontSize: 13 }}>·</span>
-        <button
-          className={`chip${urgentOnly ? ' chip-urgent active' : ''}`}
-          onClick={() => setUrgentOnly(v => !v)}
-        >
+        <button className={`chip${urgentOnly ? ' active' : ''}`} onClick={() => setUrgentOnly(v => !v)}>
           <Icon name="alert" size={11} /> Urgent only
         </button>
         <span style={{ flex: 1 }} />
@@ -111,7 +116,10 @@ export default function ReferralsPage() {
       </div>
 
       {/* Table */}
-      <div style={{ background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)', borderTop: 0, borderRadius: '0 0 var(--relay-radius) var(--relay-radius)', overflow: 'hidden' }}>
+      <div style={{
+        background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
+        borderTop: 0, borderRadius: '0 0 var(--relay-radius) var(--relay-radius)', overflow: 'visible',
+      }}>
         <table className="tbl">
           <thead>
             <tr>
@@ -131,7 +139,9 @@ export default function ReferralsPage() {
               return (
                 <tr
                   key={r.id}
-                  className={`row-clickable${r.priority === 'urgent' ? ' pri-urgent' : ''}`}
+                  className={r.priority === 'urgent' ? 'pri-urgent' : ''}
+                  onClick={() => router.push(`/referrals/${r.id}`)}
+                  style={{ cursor: 'pointer' }}
                 >
                   <td>
                     <div style={{ fontWeight: 500 }}>{r.patient.name}</div>
@@ -139,16 +149,22 @@ export default function ReferralsPage() {
                   </td>
                   <td style={{ fontSize: 12.5, color: 'var(--relay-ink-2)' }}>{r.referringProvider}</td>
                   <td style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', fontVariantNumeric: 'tabular-nums' }}>{r.referralTime}</td>
-                  <td><StatePill state={r.state} /></td>
+                  <td style={{ overflow: 'visible' }} onClick={e => e.stopPropagation()}>
+                    <StatePicker
+                      referralId={r.id}
+                      current={r.state}
+                      onChange={handleStateChange}
+                    />
+                  </td>
                   <td style={{ color: 'var(--relay-ink-2)' }}>{r.patient.language}</td>
                   <td style={{ color: 'var(--relay-ink-2)' }}>{r.patient.insurance}</td>
-                  <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, color: 'var(--relay-ink-3)' }}>
+                  <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, color: 'var(--relay-ink-3)' }}>
                     {lastAttempt?.summary ?? '—'}
                   </td>
                   <td>
-                    <Link href={`/referrals/${r.id}`}>
-                      <button className="btn btn-sm btn-ghost"><Icon name="arrow" size={12} /></button>
-                    </Link>
+                    <span className="btn btn-sm btn-ghost" style={{ pointerEvents: 'none' }}>
+                      <Icon name="arrow" size={12} />
+                    </span>
                   </td>
                 </tr>
               );

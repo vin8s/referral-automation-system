@@ -1,144 +1,267 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
   getConfirmQueue, getPipeline, getReferrals,
+  getUrgentAlerts,
+  getCallLog, getCalendarEvents,
 } from '@/lib/data';
 import { PageHead } from '@/components/layout/PageHead';
 import { StatePill } from '@/components/shared/StatePill';
 import { Funnel } from '@/components/shared/Funnel';
-import { MetricCard } from '@/components/shared/MetricCard';
 import { Icon } from '@/components/shared/Icon';
 import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList';
-import type { ConfirmQueueItem, PipelineCount, Referral } from '@/lib/types';
+import type {
+  ConfirmQueueItem, PipelineCount, Referral,
+  CallLogEntry, CalendarEvent, UrgentAlert, DashboardFunnelStep,
+} from '@/lib/types';
 
-// ── Compact stat ──────────────────────────────────────────────────────────────
-function CompactStat({ label, value, delta, dir }: {
-  label: string; value: string; delta: string; dir?: 'up' | 'down';
-}) {
-  const cls = dir === 'up' ? 'delta-up' : dir === 'down' ? 'delta-down' : '';
+// ── Escalation popover ────────────────────────────────────────────────────────
+function EscalationPopover({ alerts }: { alerts: UrgentAlert[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  if (alerts.length === 0) return null;
+
+  const severityLabel = (s: string) =>
+    s === 'high' ? 'High' : s === 'med' ? 'Medium' : 'Low';
+
   return (
-    <div className="ai-stat">
-      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, color: 'var(--relay-ink-3)' }}>
-        {label}
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="btn btn-sm"
+        style={{
+          background: 'var(--relay-urgent-50)',
+          color: 'var(--relay-urgent-700)',
+          borderColor: 'var(--relay-urgent-200)',
+        }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%',
+          background: 'var(--relay-urgent)',
+          display: 'inline-block', flexShrink: 0,
+        }} />
+        {alerts.length} escalation{alerts.length !== 1 ? 's' : ''} need{alerts.length === 1 ? 's' : ''} a human
+        <Icon name="chevron" size={11} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 8px)', right: 0,
+          width: 360, background: 'var(--relay-surface)',
+          border: '1px solid var(--relay-hairline)',
+          borderRadius: 10, boxShadow: 'var(--relay-shadow-pop)',
+          zIndex: 200,
+        }}>
+          {/* Header */}
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--relay-hairline)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Active escalations</div>
+              <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)', marginTop: 1 }}>
+                {alerts.length} active · SLA 5 min
+              </div>
+            </div>
+            <button className="btn btn-sm btn-ghost" onClick={() => setOpen(false)}>
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+
+          {/* Alert list */}
+          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+            {alerts.map(alert => (
+              <div
+                key={alert.referralId}
+                style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid var(--relay-hairline)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600,
+                    padding: '1px 7px', borderRadius: 99,
+                    background: 'var(--st-escalated-bg)', color: 'var(--st-escalated-fg)',
+                  }}>
+                    {severityLabel(alert.severity)}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>{alert.raisedAt}</span>
+                  {alert.owner && (
+                    <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
+                      → {alert.owner}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 2 }}>{alert.patient}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', marginBottom: alert.transcriptExcerpt.length > 0 ? 6 : 0 }}>
+                  {alert.reason}
+                </div>
+                {alert.transcriptExcerpt.length > 0 && (
+                  <div style={{
+                    fontSize: 12, color: 'var(--relay-ink-3)', fontStyle: 'italic',
+                    background: 'var(--relay-tint)', borderRadius: 5,
+                    padding: '6px 8px', borderLeft: '2px solid var(--relay-urgent-200)',
+                    lineHeight: 1.4,
+                  }}>
+                    &ldquo;{alert.transcriptExcerpt[alert.transcriptExcerpt.length - 1]?.text}&rdquo;
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: '10px 16px' }}>
+            <Link href="/alerts" style={{ display: 'block' }}>
+              <button
+                className="btn btn-sm btn-primary"
+                style={{ width: '100%', justifyContent: 'center' }}
+                onClick={() => setOpen(false)}
+              >
+                Open escalation queue <Icon name="arrow" size={12} />
+              </button>
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── AI call log card ──────────────────────────────────────────────────────────
+const OUTCOME_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
+  'No Answer':            { bg: 'var(--relay-tint)',       fg: 'var(--relay-ink-3)',      label: 'No answer'   },
+  'Voicemail Left':       { bg: 'var(--st-queued-bg)',     fg: 'var(--st-queued-fg)',     label: 'Voicemail'   },
+  'Call Back Requested':  { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',   label: 'Call back'   },
+  'Identity Verified':    { bg: 'var(--st-queued-bg)',     fg: 'var(--st-queued-fg)',     label: 'ID verified' },
+  'Interested':           { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',   label: 'Interested'  },
+  'Appointment Accepted': { bg: 'var(--st-accepted-bg)',  fg: 'var(--st-accepted-fg)',   label: 'Accepted'    },
+  'Booked':               { bg: 'var(--st-booked-bg)',    fg: 'var(--st-booked-fg)',     label: 'Booked'      },
+  'Transferred to Staff': { bg: 'var(--st-outreach-bg)', fg: 'var(--st-outreach-fg)',   label: 'Transferred' },
+  'Declined Referral':    { bg: 'var(--st-lost-bg)',      fg: 'var(--st-lost-fg)',       label: 'Declined'    },
+  'Wrong Number':         { bg: 'var(--st-lost-bg)',      fg: 'var(--st-lost-fg)',       label: 'Wrong #'     },
+  'Language Barrier':     { bg: 'var(--st-escalated-bg)', fg: 'var(--st-escalated-fg)', label: 'Lang barrier'},
+  'Disconnected':         { bg: 'var(--st-lost-bg)',      fg: 'var(--st-lost-fg)',       label: 'Disconnected'},
+  'Escalated':            { bg: 'var(--st-escalated-bg)', fg: 'var(--st-escalated-fg)', label: 'Escalated'   },
+};
+
+function AICallLogCard({ entries }: { entries: CallLogEntry[] }) {
+  const recent = entries.slice(0, 7);
+  return (
+    <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div className="card-head">
+        <div>
+          <h3>AI call log</h3>
+          <p className="card-sub">Most recent attempts</p>
+        </div>
+        <Link href="/calls">
+          <button className="btn btn-sm btn-ghost">View all <Icon name="arrow" size={11} /></button>
+        </Link>
       </div>
-      <div className="tnum" style={{ fontSize: 17, fontWeight: 600, marginTop: 1, letterSpacing: '-0.01em' }}>
-        {value}
-        <span className={cls} style={{ fontSize: 11, marginLeft: 6, fontWeight: 500 }}>{delta}</span>
+      <div className="stack-tight" style={{ gap: 0 }}>
+        {recent.map((entry, i) => {
+          const style = OUTCOME_STYLE[entry.outcome] ?? OUTCOME_STYLE['No Answer'];
+          return (
+            <div
+              key={`${entry.referralId}-${entry.attempt}`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 0',
+                borderBottom: i < recent.length - 1 ? '1px solid var(--relay-hairline)' : 'none',
+              }}
+            >
+              <div style={{
+                width: 28, height: 28, borderRadius: 6,
+                background: 'var(--relay-tint)', border: '1px solid var(--relay-hairline)',
+                display: 'grid', placeItems: 'center', flexShrink: 0, color: 'var(--relay-ink-3)',
+              }}>
+                <Icon name={entry.channel === 'sms' ? 'sms' : 'phone'} size={13} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {entry.patient}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
+                  {entry.timestamp} · {entry.duration !== '—' ? entry.duration : '—'}
+                </div>
+              </div>
+              <span style={{
+                fontSize: 11, fontWeight: 500,
+                padding: '2px 7px', borderRadius: 99,
+                background: style.bg, color: style.fg, flexShrink: 0,
+              }}>
+                {style.label}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ── Pipeline glance ───────────────────────────────────────────────────────────
-function PipelineGlance({ pipeline }: { pipeline: PipelineCount[] }) {
-  const statOrder = ['Queued', 'Outreach', 'Slot accepted', 'Booked', 'Escalated', 'Closed-won'];
-  const displayed = statOrder.map(s => ({ state: s, count: pipeline.find(p => p.state === s)?.count ?? 0 }));
-  const max = Math.max(...displayed.map(s => s.count), 1);
-  const total = displayed.reduce((a, b) => a + b.count, 0);
-  const stateVarMap: Record<string, string> = {
-    'Queued': 'var(--st-queued-fg)', 'Outreach': 'var(--st-outreach-fg)',
-    'Slot accepted': 'var(--st-accepted-fg)', 'Booked': 'var(--st-booked-fg)',
-    'Escalated': 'var(--st-escalated-fg)', 'Closed-won': 'var(--st-won-fg)',
-  };
+// ── Upcoming appointments card ────────────────────────────────────────────────
+function UpcomingAppointmentsCard({ events }: { events: CalendarEvent[] }) {
+  const upcoming = events.slice(0, 5);
   return (
     <div className="card" style={{ flex: 1 }}>
       <div className="card-head">
         <div>
-          <h3>Pipeline at a glance</h3>
-          <p className="card-sub">{total} referrals in motion</p>
+          <h3>Upcoming appointments</h3>
+          <p className="card-sub">Confirmed bookings · shadow calendar</p>
         </div>
+        <Link href="/calendar">
+          <button className="btn btn-sm btn-ghost">Calendar <Icon name="arrow" size={11} /></button>
+        </Link>
       </div>
-      <div className="stack-tight" style={{ gap: 9 }}>
-        {displayed.map(s => (
-          <div key={s.state} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ width: 116, flexShrink: 0 }}><StatePill state={s.state} /></span>
-            <div style={{ flex: 1, height: 6, background: 'var(--relay-tint)', borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ width: `${(s.count / max) * 100}%`, height: '100%', background: stateVarMap[s.state] ?? 'var(--relay-ink-4)', opacity: 0.55 }} />
-            </div>
-            <span className="tnum fw-6" style={{ width: 24, textAlign: 'right', fontSize: 13 }}>{s.count}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── AI health panel ───────────────────────────────────────────────────────────
-function AICheckPanel() {
-  return (
-    <div className="card">
-      <div className="card-head">
-        <div>
-          <h3>Is the AI working?</h3>
-          <p className="card-sub">Live health signals · last 60 min</p>
+      {upcoming.length === 0 ? (
+        <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--relay-ink-3)', fontSize: 13 }}>
+          No upcoming bookings yet
         </div>
-        <span style={{ fontSize: 11.5, background: 'var(--st-booked-bg)', color: 'var(--st-booked-fg)', padding: '2px 9px', borderRadius: 99, fontWeight: 500 }}>
-          All systems normal
-        </span>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        {[
-          { label: 'Disclosure played', value: '100% of calls' },
-          { label: 'Quiet hours respected', value: '100%' },
-          { label: 'Avg time-to-first-attempt', value: '17 min' },
-          { label: 'Escalations triggered', value: '1 · within SLA' },
-          { label: 'Shadow-calendar fidelity', value: '99.4%', accent: true },
-          { label: 'Opt-outs honored', value: '2 / 2' },
-        ].map(row => (
-          <div key={row.label}>
-            <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>{row.label}</div>
-            <div className="fw-6" style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: row.accent ? 'var(--relay-accent-700)' : undefined }}>
-              {row.value}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Mini calendar ─────────────────────────────────────────────────────────────
-function CalendarMini() {
-  const days = ['Mon 14', 'Tue 15', 'Wed 16', 'Thu 17', 'Fri 18'];
-  const times = ['9 AM', '10 AM', '11 AM', '12 PM', '1 PM', '2 PM', '3 PM'];
-  const appts = [
-    { d: 0, t: 0, who: 'Linh P.', accepted: false },
-    { d: 0, t: 4, who: 'Helena B.', accepted: false },
-    { d: 1, t: 1, who: 'Aisha P.', accepted: false },
-    { d: 1, t: 5, who: 'James O.', accepted: true },
-    { d: 2, t: 2, who: 'Robert K.', accepted: true },
-    { d: 2, t: 6, who: 'Beatriz C.', accepted: false },
-    { d: 4, t: 0, who: 'Sofia R.', accepted: false },
-  ];
-  return (
-    <div className="card" style={{ flex: 1.4 }}>
-      <div className="card-head" style={{ marginBottom: 10 }}>
-        <div><h3>This week&apos;s schedule</h3><p className="card-sub">Apr 14–18 · confirmed + awaiting MA</p></div>
-        <Link href="/calendar"><button className="btn btn-sm btn-ghost">Calendar <Icon name="arrow" size={11} /></button></Link>
-      </div>
-      <div className="mini-cal" style={{ gridTemplateColumns: '38px repeat(5, 1fr)' }}>
-        <div className="mc hd" />
-        {days.map(d => <div key={d} className="mc hd">{d}</div>)}
-        {times.map((t, ti) => (
-          <React.Fragment key={`r-${ti}`}>
-            <div className="mc tcol">{t}</div>
-            {days.map((_, di) => {
-              const a = appts.find(x => x.d === di && x.t === ti);
-              return (
-                <div key={`${ti}-${di}`} className="mc">
-                  {a && <div className="mc-appt" style={a.accepted ? { background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)', borderColor: 'var(--st-accepted-fg)' } : undefined}>{a.who}</div>}
+      ) : (
+        <div className="stack-tight" style={{ gap: 0 }}>
+          {upcoming.map((ev, i) => (
+            <div
+              key={ev.referralId}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '9px 0',
+                borderBottom: i < upcoming.length - 1 ? '1px dashed var(--relay-hairline)' : 'none',
+              }}
+            >
+              <div style={{
+                width: 34, height: 34, borderRadius: 8,
+                background: 'var(--relay-accent-50)', border: '1px solid var(--relay-accent-200)',
+                display: 'grid', placeItems: 'center', flexShrink: 0,
+              }}>
+                <Icon name="cal" size={15} style={{ color: 'var(--relay-accent-700)' }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 13 }}>{ev.patient}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
+                  {ev.day} · {ev.time} · {ev.provider}
                 </div>
-              );
-            })}
-          </React.Fragment>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 12, marginTop: 10, fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, background: 'var(--relay-accent-100)', border: '1px solid var(--relay-accent-200)', borderRadius: 2 }} />Booked</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, background: 'var(--st-accepted-bg)', border: '1px solid var(--st-accepted-fg)', borderRadius: 2 }} />Awaiting MA</span>
-      </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                <StatePill state={ev.state} />
+                {ev.mirrorStatus === 'mirrored' && (
+                  <span style={{ fontSize: 10.5, color: 'var(--relay-ink-4)' }}>mirrored ✓</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -157,13 +280,21 @@ function RecentReferralsTable({ rows }: { rows: Referral[] }) {
           <tr key={r.id} className={`row-clickable${r.priority === 'urgent' ? ' pri-urgent' : ''}`}>
             <td>
               <div style={{ fontWeight: 500 }}>{r.patient.name}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>{r.patient.age}{r.patient.sex} · {r.id}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
+                {r.patient.age}{r.patient.sex} · {r.id}
+              </div>
             </td>
             <td style={{ color: 'var(--relay-ink-2)' }}>{r.reason}</td>
             <td style={{ fontSize: 12.5, color: 'var(--relay-ink-2)' }}>{r.referringProvider}</td>
-            <td style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', fontVariantNumeric: 'tabular-nums' }}>{r.referralTime}</td>
+            <td style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', fontVariantNumeric: 'tabular-nums' }}>
+              {r.referralTime}
+            </td>
             <td><StatePill state={r.state} /></td>
-            <td><Link href={`/referrals/${r.id}`}><button className="btn btn-sm btn-ghost"><Icon name="arrow" size={12} /></button></Link></td>
+            <td>
+              <Link href={`/referrals/${r.id}`}>
+                <button className="btn btn-sm btn-ghost"><Icon name="arrow" size={12} /></button>
+              </Link>
+            </td>
           </tr>
         ))}
       </tbody>
@@ -172,215 +303,108 @@ function RecentReferralsTable({ rows }: { rows: Referral[] }) {
 }
 
 // ── Pipeline funnel card ──────────────────────────────────────────────────────
-function PipelineFunnelCard() {
+function PipelineFunnelCard({ steps }: { steps: DashboardFunnelStep[] }) {
   return (
-    <div className="card">
+    <div className="card" style={{ flex: 1 }}>
       <div className="card-head">
-        <div><h3>Today&apos;s referral pipeline</h3><p className="card-sub">Funnel for referrals touched in the last 24h</p></div>
+        <div>
+          <h3>Today&apos;s referral pipeline</h3>
+          <p className="card-sub">Funnel for referrals touched in the last 24h</p>
+        </div>
         <button className="btn btn-sm btn-ghost">7-day view <Icon name="chevron" size={12} /></button>
       </div>
-      <Funnel steps={[
-        { label: 'Ingested', n: 38, conv: null },
-        { label: 'Contacted', n: 27, conv: 71 },
-        { label: 'Slot accepted', n: 14, conv: 52 },
-        { label: 'Confirmed', n: 11, conv: 79 },
-        { label: 'Completed', n: 9, conv: 82 },
-      ]} />
-    </div>
-  );
-}
-
-// ── Layout: Vitals-first ──────────────────────────────────────────────────────
-function VitalsFirst({ queue, pipeline, referrals }: { queue: ConfirmQueueItem[]; pipeline: PipelineCount[]; referrals: Referral[] }) {
-  return (
-    <div className="stack">
-      <div className="card" style={{ padding: '12px 18px' }}>
-        <div className="between" style={{ marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 13 }}>
-            Today&apos;s call activity
-            <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--relay-ink-3)', fontSize: 12 }}>last 24h · vs. typical day</span>
-          </h3>
-          <button className="btn btn-sm btn-ghost">7-day <Icon name="chevron" size={12} /></button>
-        </div>
-        <div className="ai-stats">
-          <CompactStat label="Calls made" value="142" delta="+18" dir="up" />
-          <CompactStat label="Connected" value="61" delta="43% pickup" />
-          <CompactStat label="Slots captured" value="14" delta="+4" dir="up" />
-          <CompactStat label="Confirmations" value="11" delta="3 in queue" />
-          <CompactStat label="No-answers" value="63" delta="−7" dir="down" />
-        </div>
-      </div>
-
-      <div className="row" style={{ alignItems: 'stretch' }}>
-        <div className="card" style={{ flex: 2 }}>
-          <div className="card-head">
-            <div><h3>Needs your action</h3><p className="card-sub">AI-captured slots awaiting confirmation in your practice system</p></div>
-            {queue.length > 0 && <span style={{ fontSize: 11.5, background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)', padding: '2px 9px', borderRadius: 99, fontWeight: 500 }}>{queue.length} pending</span>}
-          </div>
-          <ActionQueueList items={queue} compact />
-        </div>
-        <PipelineGlance pipeline={pipeline} />
-      </div>
-
-      <div className="card" style={{ padding: 0 }}>
-        <div className="card-head" style={{ padding: '14px 16px 12px', marginBottom: 0, borderBottom: '1px solid var(--relay-hairline)' }}>
-          <div><h3>Recent referrals</h3><p className="card-sub">5 most recent · newest first</p></div>
-          <Link href="/referrals"><button className="btn btn-sm btn-ghost">View all <Icon name="arrow" size={11} /></button></Link>
-        </div>
-        <RecentReferralsTable rows={referrals.slice(0, 5)} />
-      </div>
-
-      <div className="row">
-        <AICheckPanel />
-        <CalendarMini />
-      </div>
-
-      <PipelineFunnelCard />
-    </div>
-  );
-}
-
-// ── Layout: Action-first ──────────────────────────────────────────────────────
-function ActionFirst({ queue, pipeline }: { queue: ConfirmQueueItem[]; pipeline: PipelineCount[] }) {
-  return (
-    <div className="stack">
-      <div className="row" style={{ alignItems: 'stretch' }}>
-        <div className="card" style={{ flex: 2 }}>
-          <div className="card-head">
-            <div><h3>Needs your action</h3><p className="card-sub">AI-captured slots awaiting confirmation in your practice system</p></div>
-            {queue.length > 0 && <span style={{ fontSize: 11.5, background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)', padding: '2px 9px', borderRadius: 99, fontWeight: 500 }}>{queue.length} pending</span>}
-          </div>
-          <ActionQueueList items={queue} />
-        </div>
-        <div className="stack" style={{ flex: 1, gap: 'var(--gap, 12px)' }}>
-          <AICheckPanel />
-          <CalendarMini />
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
-        <MetricCard label="Calls made" value="142" delta="+18 vs. typical" deltaDir="up" spark={[80, 92, 88, 110, 98, 120, 134, 142]} />
-        <MetricCard label="Calls connected" value="61" delta="43% pickup · steady" spark={[40, 42, 48, 50, 55, 58, 56, 61]} />
-        <MetricCard label="Slots captured" value="14" delta="+4 vs. typical" deltaDir="up" spark={[6, 7, 9, 8, 10, 11, 13, 14]} />
-        <MetricCard label="Confirmations done" value="11" delta="3 in queue" spark={[4, 5, 7, 8, 8, 9, 10, 11]} />
-        <MetricCard label="No-answers" value="63" delta="↓ 7 vs. typical" deltaDir="down" spark={[78, 72, 70, 68, 65, 64, 65, 63]} />
-      </div>
-
-      <PipelineFunnelCard />
-    </div>
-  );
-}
-
-// ── Layout: Split rhythm ──────────────────────────────────────────────────────
-function SplitRhythm({ queue }: { queue: ConfirmQueueItem[] }) {
-  return (
-    <div className="stack">
-      <div className="row">
-        <div className="stack" style={{ flex: 1.6, gap: 12 }}>
-          <div className="card">
-            <div className="card-head">
-              <div><h3>What needs me</h3><p className="card-sub">Your action queue, in priority order</p></div>
-              {queue.length > 0 && <span style={{ fontSize: 11.5, background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)', padding: '2px 9px', borderRadius: 99, fontWeight: 500 }}>{queue.length} now</span>}
-            </div>
-            <ActionQueueList items={queue} />
-          </div>
-          <PipelineFunnelCard />
-        </div>
-        <div className="stack" style={{ flex: 1, gap: 12 }}>
-          <div className="card">
-            <div className="card-head">
-              <h3>Is the AI working</h3>
-              <span style={{ fontSize: 11.5, background: 'var(--st-booked-bg)', color: 'var(--st-booked-fg)', padding: '2px 8px', borderRadius: 99, fontWeight: 500 }}>Healthy</span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              {[
-                { label: 'Calls today', value: '142', sub: '+18 vs. typical' },
-                { label: 'Pickup rate', value: '43%', sub: 'steady' },
-                { label: 'Slots captured', value: '14', sub: '+4 vs. typical' },
-                { label: 'Confirmations', value: '11', sub: '3 in queue' },
-              ].map(m => (
-                <div key={m.label}>
-                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, color: 'var(--relay-ink-3)' }}>{m.label}</div>
-                  <div className="tnum" style={{ fontSize: 22, fontWeight: 600, marginTop: 2, letterSpacing: '-0.02em' }}>{m.value}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>{m.sub}</div>
-                </div>
-              ))}
-            </div>
-            <div className="relay-divider" />
-            <div className="stack-tight" style={{ fontSize: 13 }}>
-              <div className="between"><span style={{ color: 'var(--relay-ink-3)' }}>Disclosure played</span><span className="fw-6">100%</span></div>
-              <div className="between"><span style={{ color: 'var(--relay-ink-3)' }}>Quiet hours respected</span><span className="fw-6">100%</span></div>
-              <div className="between"><span style={{ color: 'var(--relay-ink-3)' }}>Shadow-calendar fidelity</span><span className="fw-6" style={{ color: 'var(--relay-accent-700)' }}>99.4%</span></div>
-              <div className="between"><span style={{ color: 'var(--relay-ink-3)' }}>Avg time-to-first-attempt</span><span className="fw-6">17 min</span></div>
-            </div>
-          </div>
-          <CalendarMini />
-        </div>
-      </div>
+      <Funnel steps={steps} />
     </div>
   );
 }
 
 // ── Dashboard page ────────────────────────────────────────────────────────────
-type DashLayout = 'vitals' | 'action' | 'split';
-
-const LAYOUTS: Array<{ value: DashLayout; label: string }> = [
-  { value: 'action', label: 'Action-first' },
-  { value: 'vitals', label: 'Vitals-first' },
-  { value: 'split', label: 'Split rhythm' },
-];
-
 export default function DashboardPage() {
-  const [layout, setLayout] = useState<DashLayout>('vitals');
-  const [queue, setQueue] = useState<ConfirmQueueItem[]>([]);
-  const [pipeline, setPipeline] = useState<PipelineCount[]>([]);
+  const [queue, setQueue]         = useState<ConfirmQueueItem[]>([]);
+  const [pipeline, setPipeline]   = useState<PipelineCount[]>([]);
   const [referrals, setReferrals] = useState<Referral[]>([]);
+  const [callLog, setCallLog]     = useState<CallLogEntry[]>([]);
+  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
+  const [alerts, setAlerts]       = useState<UrgentAlert[]>([]);
 
-  useEffect(() => {
-    Promise.all([getConfirmQueue(), getPipeline(), getReferrals()]).then(([q, p, r]) => {
+  const fetchAll = useCallback(() => {
+    Promise.all([
+      getConfirmQueue(),
+      getPipeline(),
+      getReferrals(),
+      getCallLog(),
+      getCalendarEvents(),
+      getUrgentAlerts(),
+    ]).then(([q, p, r, cl, ce, al]) => {
       setQueue(q);
       setPipeline(p);
       setReferrals(r);
+      setCallLog(cl);
+      setCalEvents(ce);
+      setAlerts(al);
     });
   }, []);
 
-  const inMotion = pipeline.filter(p => !['Closed-won', 'Closed-lost'].includes(p.state)).reduce((a, b) => a + b.count, 0);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Called by ActionQueueList after a confirm/reject so the whole page reflects
+  // the updated referral state from the data layer.
+  const handleConfirmed = useCallback(() => { fetchAll(); }, [fetchAll]);
+
+  const inMotion = pipeline.reduce((a, b) => a + b.count, 0);
 
   return (
     <>
       <PageHead
         title="Good morning, Priya"
-        sub={`Today is Apr 14 · ${inMotion || 38} referrals in motion`}
+        sub={`Today is Apr 14 · ${inMotion || '—'} referrals in motion`}
       >
-        {/* Layout tabs */}
-        <div className="variations">
-          {LAYOUTS.map(l => (
-            <button
-              key={l.value}
-              className={`variation-btn${layout === l.value ? ' active' : ''}`}
-              onClick={() => setLayout(l.value)}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Escalation notification */}
-        <Link href="/alerts">
-          <button className="btn btn-sm" style={{ background: 'var(--relay-urgent-50)', color: 'var(--relay-urgent-700)', borderColor: 'var(--relay-urgent-200)' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--relay-urgent)', flexShrink: 0, display: 'inline-block' }} />
-            1 escalation needs a human
-            <Icon name="arrow" size={11} />
-          </button>
-        </Link>
-
-        <button className="btn btn-sm btn-ghost"><Icon name="refresh" size={13} /></button>
-        <button className="btn btn-sm">Today <Icon name="chevron" size={12} /></button>
+        <EscalationPopover alerts={alerts} />
+        <button className="btn btn-sm btn-ghost" onClick={fetchAll}>
+          <Icon name="refresh" size={13} />
+        </button>
       </PageHead>
 
-      {layout === 'action' && <ActionFirst queue={queue} pipeline={pipeline} />}
-      {layout === 'vitals' && <VitalsFirst queue={queue} pipeline={pipeline} referrals={referrals} />}
-      {layout === 'split' && <SplitRhythm queue={queue} />}
+      <div className="stack">
+        {/* Row 1 — action queue + AI call log */}
+        <div className="row" style={{ alignItems: 'stretch' }}>
+          <div className="card" style={{ flex: 2 }}>
+            <div className="card-head">
+              <div>
+                <h3>Needs your action</h3>
+                <p className="card-sub">AI-captured slots awaiting confirmation in your practice system</p>
+              </div>
+              {queue.length > 0 && (
+                <span style={{
+                  fontSize: 11.5, padding: '2px 9px', borderRadius: 99, fontWeight: 500,
+                  background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)',
+                }}>
+                  {queue.length} pending
+                </span>
+              )}
+            </div>
+            <ActionQueueList items={queue} compact onConfirmed={handleConfirmed} />
+          </div>
+          <AICallLogCard entries={callLog} />
+        </div>
+
+        {/* Row 2 — recent referrals */}
+        <div className="card" style={{ padding: 0 }}>
+          <div className="card-head" style={{ padding: '14px 16px 12px', marginBottom: 0, borderBottom: '1px solid var(--relay-hairline)' }}>
+            <div>
+              <h3>Recent referrals</h3>
+              <p className="card-sub">8 most recent · newest first</p>
+            </div>
+            <Link href="/referrals">
+              <button className="btn btn-sm btn-ghost">View all <Icon name="arrow" size={11} /></button>
+            </Link>
+          </div>
+          <RecentReferralsTable rows={referrals.slice(0, 8)} />
+        </div>
+
+        {/* Row 3 — upcoming appointments */}
+        <UpcomingAppointmentsCard events={calEvents} />
+      </div>
     </>
   );
 }

@@ -46,7 +46,7 @@ function CadenceSettings() {
         <SettingRow label="Voice attempt #2" sub="Different time-of-day if #1 was no-answer" control={<FakeInput value="Day +2" />} />
         <SettingRow label="SMS fallback" sub="After two voicemails / no-answers" control={<FakeInput value="Day +3" />} />
         <SettingRow label="Voice attempt #3" control={<FakeInput value="Day +5" />} />
-        <SettingRow label="Stop rule" sub="Mark Closed-lost; re-activatable after 60 days" control={<FakeInput value="5 attempts" w={110} />} />
+        <SettingRow label="Stop rule" sub="Cadence ends; referral remains available for re-engagement" control={<FakeInput value="5 attempts" w={110} />} />
       </div>
       <div className="card">
         <div className="card-head"><h3>Urgent / high-priority overrides</h3></div>

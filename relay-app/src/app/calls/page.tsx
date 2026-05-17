@@ -10,13 +10,19 @@ import { getCallLog } from '@/lib/data';
 import type { CallLogEntry } from '@/lib/types';
 
 const OUTCOME_STATE: Record<string, string> = {
-  connected: 'Outreach',
-  accepted: 'Booked',
-  escalated: 'Escalated',
-  voicemail: 'Ingested',
-  noanswer: 'Closed-lost',
-  delivered: 'Queued',
-  'outbound-confirm': 'Closed-won',
+  'No Answer':            'Queued',
+  'Voicemail Left':       'Queued',
+  'Call Back Requested':  'In Progress',
+  'Identity Verified':    'In Progress',
+  'Interested':           'In Progress',
+  'Appointment Accepted': 'Pending Confirmation',
+  'Booked':               'Booked',
+  'Transferred to Staff': 'Pending Confirmation',
+  'Declined Referral':    'In Progress',
+  'Wrong Number':         'Escalated',
+  'Language Barrier':     'Escalated',
+  'Disconnected':         'In Progress',
+  'Escalated':            'Escalated',
 };
 
 function CallDetailModal({ call, onClose }: { call: CallLogEntry; onClose: () => void }) {
@@ -75,10 +81,14 @@ export default function CallsPage() {
     getCallLog().then(setCalls);
   }, []);
 
-  const outcomes = ['all', 'connected', 'voicemail', 'noanswer', 'escalated', 'sms'];
+  const outcomes = ['all', 'No Answer', 'Voicemail Left', 'Appointment Accepted', 'Escalated', 'sms'];
   const outcomeLabels: Record<string, string> = {
-    all: 'All outcomes', connected: 'Connected', voicemail: 'Voicemail',
-    noanswer: 'No answer', escalated: 'Escalated', sms: 'SMS',
+    'all': 'All outcomes',
+    'No Answer': 'No answer',
+    'Voicemail Left': 'Voicemail',
+    'Appointment Accepted': 'Accepted',
+    'Escalated': 'Escalated',
+    'sms': 'SMS',
   };
 
   const filtered = outcomeFilter === 'all'
@@ -143,7 +153,7 @@ export default function CallsPage() {
                   </div>
                 </td>
                 <td>
-                  <StatePill state={OUTCOME_STATE[c.outcome] ?? 'Ingested'} label={c.outcome} />
+                  <StatePill state={OUTCOME_STATE[c.outcome] ?? 'Queued'} label={c.outcome} />
                 </td>
                 <td style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12.5 }}>{c.duration ?? '—'}</td>
                 <td style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, color: 'var(--relay-ink-3)' }}>

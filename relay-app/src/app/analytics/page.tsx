@@ -94,7 +94,7 @@ export default async function AnalyticsPage() {
           <Funnel steps={[
             { label: 'Referrals received', n: 1284, conv: null },
             { label: 'Contacted', n: 1162, conv: 91 },
-            { label: 'Slot accepted', n: 612, conv: 53 },
+            { label: 'Pending Confirmation', n: 612, conv: 53 },
             { label: 'Confirmed', n: 547, conv: 89 },
             { label: 'Visit completed', n: 482, conv: 88 },
           ]} />
