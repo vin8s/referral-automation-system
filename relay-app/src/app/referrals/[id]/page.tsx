@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getReferralById, addCallAttempt } from '@/lib/data';
+import { getReferralById, addCallAttempt, updateReferralState } from '@/lib/data';
 import { StatePill } from '@/components/shared/StatePill';
 import { StatePicker } from '@/components/shared/StatePicker';
 import { Avatar } from '@/components/shared/Avatar';
@@ -31,6 +31,23 @@ function outcomeLabel(result: ElevenLabsCallResult): Attempt['outcome'] {
   if (reason === 'no_answer') return 'No Answer';
   return 'No Answer';
 }
+
+// Maps each call outcome to the resulting referral state per REFERRAL_STATUSES.md
+const OUTCOME_TO_STATE: Record<string, ReferralState> = {
+  'No Answer':            'In Progress',
+  'Voicemail Left':       'In Progress',
+  'Call Back Requested':  'In Progress',
+  'Identity Verified':    'In Progress',
+  'Interested':           'In Progress',
+  'Appointment Accepted': 'Pending Confirmation',
+  'Booked':               'Booked',
+  'Transferred to Staff': 'Pending Confirmation',
+  'Declined Referral':    'In Progress',
+  'Wrong Number':         'Escalated',
+  'Language Barrier':     'Escalated',
+  'Disconnected':         'In Progress',
+  'Escalated':            'Escalated',
+};
 
 function formatDuration(secs?: number): string {
   if (!secs) return '—';
@@ -95,18 +112,16 @@ function CallConfirmModal({
 
 function CallResultPanel({
   result,
-  onSave,
   saving,
+  determinedState,
 }: {
   result: ElevenLabsCallResult;
-  onSave: () => void;
   saving: boolean;
+  determinedState: ReferralState;
 }) {
   const duration = formatDuration(result.metadata?.call_duration_secs);
   const summary = result.analysis?.transcript_summary ?? '—';
   const connected = result.analysis?.call_successful !== 'failure';
-  const booking = result.analysis?.data_collection_results?.['appointment_booked'];
-  const bookingDate = result.analysis?.data_collection_results?.['appointment_date'];
 
   return (
     <div className="card" style={{ border: '1px solid var(--relay-accent-200)', background: 'var(--relay-accent-50)' }}>
@@ -115,8 +130,8 @@ function CallResultPanel({
           <span style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             width: 22, height: 22, borderRadius: 99,
-            background: connected ? 'var(--st-booked-bg)' : 'var(--st-lost-bg)',
-            color: connected ? 'var(--st-booked-fg)' : 'var(--st-lost-fg)',
+            background: connected ? 'var(--st-booked-bg)' : 'var(--relay-tint)',
+            color: connected ? 'var(--st-booked-fg)' : 'var(--relay-ink-3)',
             fontSize: 11,
           }}>
             <Icon name={connected ? 'check' : 'x'} size={11} />
@@ -125,34 +140,15 @@ function CallResultPanel({
             Call complete · {connected ? 'Connected' : 'No answer'} · {duration}
           </h3>
         </div>
-        <button
-          className="btn btn-sm btn-primary"
-          onClick={onSave}
-          disabled={saving}
-        >
-          {saving ? 'Saving…' : 'Save to timeline'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <StatePill state={determinedState} />
+          {saving && <span style={{ fontSize: 12, color: 'var(--relay-ink-3)' }}>Saving to timeline…</span>}
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 10 }}>
-        <div>
-          <div style={{ fontSize: 10.5, color: 'var(--relay-ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: 4 }}>AI Summary</div>
-          <p style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', margin: 0, lineHeight: 1.5 }}>{summary}</p>
-        </div>
-        <div>
-          <div style={{ fontSize: 10.5, color: 'var(--relay-ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: 4 }}>Detected data</div>
-          <div style={{ fontSize: 12.5, color: 'var(--relay-ink-2)' }}>
-            <div>Connected: <strong>{connected ? 'Yes' : 'No'}</strong></div>
-            {booking && (
-              <div>Booked: <strong>{String(booking.value)}</strong></div>
-            )}
-            {bookingDate && (
-              <div>Appointment: <strong>{String(bookingDate.value)}</strong></div>
-            )}
-            <div>Duration: <strong>{duration}</strong></div>
-            <div>Termination: <strong>{result.metadata?.termination_reason ?? '—'}</strong></div>
-          </div>
-        </div>
+      <div style={{ marginTop: 10 }}>
+        <div style={{ fontSize: 10.5, color: 'var(--relay-ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: 4 }}>AI Summary</div>
+        <p style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', margin: 0, lineHeight: 1.5 }}>{summary}</p>
       </div>
 
       {result.transcript && result.transcript.length > 0 && (
@@ -201,6 +197,7 @@ export default function ReferralDetailPage() {
   const [callResult, setCallResult] = useState<ElevenLabsCallResult | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
   const [savingCall, setSavingCall] = useState(false);
+  const [expandedAttempt, setExpandedAttempt] = useState<number | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -301,32 +298,35 @@ export default function ReferralDetailPage() {
     }
   }
 
-  async function saveCallToTimeline() {
-    if (!referral || !callResult) return;
+  async function saveCallToTimeline(result: ElevenLabsCallResult, currentReferral: Referral) {
     setSavingCall(true);
 
     const now = new Date().toLocaleString('en-US', {
       month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
     });
 
-    const duration = formatDuration(callResult.metadata?.call_duration_secs);
-    const summary = callResult.analysis?.transcript_summary ?? 'AI call · no summary available';
-    const outcome = outcomeLabel(callResult);
+    const duration = formatDuration(result.metadata?.call_duration_secs);
+    const summary = result.analysis?.transcript_summary ?? 'AI call · no summary available';
+    const outcome = outcomeLabel(result);
+    const newState = OUTCOME_TO_STATE[outcome] ?? 'In Progress';
 
-    const turns = (callResult.transcript ?? []).map(t => ({
+    const turns = (result.transcript ?? []).map(t => ({
       who: (t.role === 'agent' ? 'ai' : 'patient') as 'ai' | 'patient',
       text: t.message,
     }));
 
-    await addCallAttempt(referral.id, {
-      timestamp: now,
-      channel: 'voice' as const,
-      outcome,
-      duration,
-      disclosurePlayed: true,
-      summary,
-      transcript: turns,
-    });
+    await Promise.all([
+      addCallAttempt(currentReferral.id, {
+        timestamp: now,
+        channel: 'voice' as const,
+        outcome,
+        duration,
+        disclosurePlayed: true,
+        summary,
+        transcript: turns,
+      }),
+      updateReferralState(currentReferral.id, newState),
+    ]);
 
     setSavingCall(false);
     setCallPhase('idle');
@@ -334,6 +334,14 @@ export default function ReferralDetailPage() {
     setCallId(null);
     await loadReferral();
   }
+
+  // Auto-save immediately when a call result arrives — no manual button needed
+  useEffect(() => {
+    if (callPhase === 'done' && callResult && referral) {
+      saveCallToTimeline(callResult, referral);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callPhase, callResult]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -380,7 +388,35 @@ export default function ReferralDetailPage() {
         <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
           <Avatar name={r.patient.name} size="lg" />
           <div>
-            <h1 style={{ fontSize: 22 }}>{r.patient.name}</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <h1 style={{ fontSize: 22, margin: 0 }}>{r.patient.name}</h1>
+              {/* Make call button — inline with name */}
+              {callPhase === 'idle' && (
+                <button className="btn btn-primary" style={{ fontSize: 13, padding: '5px 14px', borderRadius: 7, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }} onClick={startCall}>
+                  <Icon name="phone" size={13} /> Make call
+                </button>
+              )}
+              {callPhase === 'calling' && (
+                <button className="btn" style={{ fontSize: 13, padding: '5px 14px', borderRadius: 7, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }} disabled>
+                  <Icon name="phone" size={13} /> Calling…
+                </button>
+              )}
+              {callPhase === 'polling' && (
+                <button className="btn" style={{ fontSize: 13, padding: '5px 14px', borderRadius: 7, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }} disabled>
+                  <Icon name="phone" size={13} /> Call in progress…
+                </button>
+              )}
+              {callPhase === 'done' && (
+                <button className="btn" style={{ fontSize: 13, padding: '5px 14px', borderRadius: 7, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--st-booked-bg)', color: 'var(--st-booked-fg)', borderColor: 'var(--relay-accent-200)' }} disabled>
+                  <Icon name="check" size={13} /> Call complete
+                </button>
+              )}
+              {callPhase === 'error' && (
+                <button className="btn" style={{ fontSize: 13, padding: '5px 14px', borderRadius: 7, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, background: '#fee2e2', color: '#b91c1c', borderColor: '#fecaca' }} onClick={startCall}>
+                  <Icon name="alert" size={13} /> Retry call
+                </button>
+              )}
+            </div>
             <div className="sub" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
               {r.patient.age}{r.patient.sex} · {r.patient.language} · {r.patient.insurance}
               <StatePicker
@@ -398,37 +434,6 @@ export default function ReferralDetailPage() {
         </div>
 
         <div className="right">
-          {/* Make call button */}
-          {callPhase === 'idle' && (
-            <button className="btn btn-sm btn-primary" onClick={startCall}>
-              <Icon name="phone" size={12} /> Make call
-            </button>
-          )}
-          {callPhase === 'calling' && (
-            <button className="btn btn-sm" disabled>
-              <Icon name="phone" size={12} /> Calling…
-            </button>
-          )}
-          {callPhase === 'polling' && (
-            <button className="btn btn-sm" disabled>
-              <Icon name="phone" size={12} /> Call in progress…
-            </button>
-          )}
-          {callPhase === 'done' && (
-            <button className="btn btn-sm" style={{ background: 'var(--st-booked-bg)', color: 'var(--st-booked-fg)', borderColor: 'var(--relay-accent-200)' }} disabled>
-              <Icon name="check" size={12} /> Call complete
-            </button>
-          )}
-          {callPhase === 'error' && (
-            <button className="btn btn-sm" style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fecaca' }} onClick={startCall}>
-              <Icon name="alert" size={12} /> Retry call
-            </button>
-          )}
-
-          <button className="btn btn-sm"><Icon name="pause" size={12} /> Pause cadence</button>
-          <button className="btn btn-sm" style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fecaca' }}>
-            <Icon name="flag" size={12} /> Escalate
-          </button>
           {r.state === 'Pending Confirmation' && (
             <Link href="/action">
               <button className="btn btn-sm btn-primary"><Icon name="check" size={12} /> Confirm slot</button>
@@ -461,13 +466,13 @@ export default function ReferralDetailPage() {
         </div>
       )}
 
-      {/* Post-call result panel (spans full width above columns) */}
-      {callPhase === 'done' && callResult && (
+      {/* Post-call result panel — shown while auto-saving */}
+      {(callPhase === 'done' || savingCall) && callResult && (
         <div style={{ marginBottom: 20 }}>
           <CallResultPanel
             result={callResult}
-            onSave={saveCallToTimeline}
             saving={savingCall}
+            determinedState={OUTCOME_TO_STATE[outcomeLabel(callResult)] ?? 'In Progress'}
           />
         </div>
       )}
@@ -529,18 +534,6 @@ export default function ReferralDetailPage() {
             </div>
           )}
 
-          {/* Audit trail */}
-          <div className="card">
-            <div className="card-head"><h3>Audit trail</h3></div>
-            <div className="stack-tight" style={{ fontSize: 12.5 }}>
-              {r.audit.map((entry, i) => (
-                <div key={i} className="between">
-                  <span style={{ color: 'var(--relay-ink-3)', flexShrink: 0, marginRight: 12 }}>{entry.at}</span>
-                  <span style={{ color: 'var(--relay-ink-2)', textAlign: 'right' }}>{entry.who} — {entry.what}</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Right: timeline + transcript */}
@@ -556,52 +549,71 @@ export default function ReferralDetailPage() {
               </div>
             ) : (
               <div className="tl">
-                {r.attempts.map((attempt, i) => (
-                  <div className="tl-item" key={i}>
-                    <div className="tl-marker">
-                      <div className={`tl-dot${attempt.outcome === 'Appointment Accepted' ? ' done' : ''}`} />
-                      {i < r.attempts.length - 1 && <div className="tl-line" />}
-                    </div>
-                    <div className="tl-body">
-                      <div className="tl-title">
-                        Attempt #{attempt.n} · {attempt.channel === 'voice' ? 'Voice' : 'SMS'} · {attempt.outcome}
+                {[...r.attempts].reverse().map((attempt, i, arr) => {
+                  const isExpanded = expandedAttempt === attempt.n;
+                  const hasTranscript = attempt.channel === 'voice' && attempt.transcript.length > 0;
+                  const isLast = i === arr.length - 1;
+                  const isDone = attempt.outcome === 'Appointment Accepted' || attempt.outcome === 'Booked';
+                  const isEscalated = attempt.outcome === 'Escalated';
+                  return (
+                    <div className="tl-item" key={attempt.n}>
+                      <div className="tl-marker">
+                        <div
+                          className={`tl-dot${isDone ? ' done' : ''}`}
+                          style={isEscalated ? { background: 'var(--relay-urgent)', borderColor: 'var(--relay-urgent)' } : undefined}
+                        />
+                        {!isLast && <div className="tl-line" />}
                       </div>
-                      <div className="tl-meta">
-                        {attempt.timestamp}
-                        {attempt.duration && ` · ${attempt.duration}`}
-                        {attempt.disclosurePlayed && ' · disclosure played'}
-                      </div>
-                      {attempt.summary && (
-                        <div className="transcript-summary" style={{ marginTop: 8, fontSize: 12.5 }}>
-                          {attempt.summary}
+                      <div className="tl-body">
+                        <div
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: hasTranscript ? 'pointer' : 'default' }}
+                          onClick={() => hasTranscript && setExpandedAttempt(isExpanded ? null : attempt.n)}
+                        >
+                          <div className="tl-title">
+                            Attempt #{attempt.n} · {attempt.channel === 'voice' ? 'Voice' : 'SMS'} · {attempt.outcome}
+                          </div>
+                          {hasTranscript && (
+                            <Icon
+                              name="chevron"
+                              size={11}
+                              style={{
+                                color: 'var(--relay-ink-3)', flexShrink: 0, marginLeft: 8,
+                                transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                transition: 'transform 150ms ease',
+                              }}
+                            />
+                          )}
                         </div>
-                      )}
+                        <div className="tl-meta">
+                          {attempt.timestamp}
+                          {attempt.duration && attempt.duration !== '—' && ` · ${attempt.duration}`}
+                          {attempt.disclosurePlayed && ' · disclosure played'}
+                        </div>
+                        {attempt.summary && (
+                          <div className="transcript-summary" style={{ marginTop: 8, fontSize: 12.5 }}>
+                            {attempt.summary}
+                          </div>
+                        )}
+                        {isExpanded && hasTranscript && (
+                          <div style={{ marginTop: 12, borderTop: '1px solid var(--relay-hairline)', paddingTop: 12 }}>
+                            <TranscriptPanel
+                              data={{
+                                patient: r.patient.name,
+                                call: `Attempt #${attempt.n} · Voice · ${attempt.duration ?? ''}`,
+                                disclosure: attempt.disclosurePlayed,
+                                summary: attempt.summary,
+                                turns: attempt.transcript,
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
-
-          {lastAttempt && lastAttempt.transcript.length > 0 && (
-            <div className="card">
-              <div className="card-head">
-                <h3>Most recent call · attempt #{lastAttempt.n}</h3>
-                <Link href="/calls">
-                  <button className="btn btn-sm btn-ghost">All calls <Icon name="arrow" size={11} /></button>
-                </Link>
-              </div>
-              <TranscriptPanel
-                data={{
-                  patient: r.patient.name,
-                  call: `Attempt #${lastAttempt.n} · ${lastAttempt.channel === 'voice' ? 'Voice' : 'SMS'} · ${lastAttempt.duration ?? ''}`,
-                  disclosure: lastAttempt.disclosurePlayed,
-                  summary: lastAttempt.summary,
-                  turns: lastAttempt.transcript,
-                }}
-              />
-            </div>
-          )}
         </div>
       </div>
     </>
