@@ -37,7 +37,7 @@ export const referrals: Referral[] = [
     attempts: [
       { n: 1, timestamp: 'Apr 14, 9:02 AM', channel: 'voice', outcome: 'No Answer', duration: '0:00', disclosurePlayed: false, summary: 'No answer, no voicemail left.', transcript: [] },
       { n: 2, timestamp: 'Apr 14, 1:40 PM', channel: 'voice', outcome: 'Appointment Accepted', duration: '3:24', disclosurePlayed: true,
-        summary: 'Patient reached. AI explained AFib referral and resolved cost concern by confirming Medicare coverage. Patient accepted Tue Apr 22 at 2:15pm with Dr. Park.',
+        summary: 'Patient reached; AI explained AFib follow-up and confirmed Medicare coverage to resolve cost concern. Accepted Tue Apr 22 2:15pm with Dr. Park.',
         transcript: [
           { who: 'ai', text: 'Hi, this is an automated assistant calling on behalf of Bay Cardiology. Is this James?' },
           { who: 'patient', text: 'Yes, who is this again?' },

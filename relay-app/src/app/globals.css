@@ -160,7 +160,6 @@
   .tbl tr:last-child td { border-bottom: 0; }
   .tbl tr.row-clickable { cursor: pointer; }
   .tbl tr.row-clickable:hover td { background: var(--relay-tint); }
-  .tbl tr.pri-urgent td:first-child { box-shadow: inset 3px 0 0 #dc2626; }
   .tbl tr.pri-high td:first-child { box-shadow: inset 3px 0 0 var(--relay-urgent); }
   .tbl th.sortable { cursor: pointer; user-select: none; }
   .tbl th.sortable:hover { color: var(--relay-ink-2); background: #eef2f4; }

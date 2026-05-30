@@ -192,7 +192,6 @@ export default function ReferralsPage() {
           <Icon name="alert" size={11} /> Urgent only
         </button>
         <span style={{ flex: 1 }} />
-        <button className="chip"><Icon name="filter" size={11} /> More filters</button>
       </div>
 
       {/* Active referrals table */}

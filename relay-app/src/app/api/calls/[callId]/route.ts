@@ -1,32 +1,32 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import type { ElevenLabsCallResult } from '@/lib/types';
+
+const ELEVENLABS_BASE = 'https://api.elevenlabs.io/v1';
 
 export async function GET(
-  _req: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ callId: string }> },
 ) {
   const { callId } = await params;
-
   const apiKey = process.env.ELEVENLABS_API_KEY;
+
   if (!apiKey) {
-    return NextResponse.json({ error: 'ElevenLabs env vars not configured' }, { status: 500 });
+    return NextResponse.json({ error: 'Missing ELEVENLABS_API_KEY' }, { status: 500 });
   }
 
-  const res = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${callId}`, {
+  const res = await fetch(`${ELEVENLABS_BASE}/convai/conversations/${callId}`, {
     headers: { 'xi-api-key': apiKey },
+    cache: 'no-store',
   });
-
-  const data = await res.json();
 
   if (!res.ok) {
-    return NextResponse.json({ error: data }, { status: res.status });
+    const err = await res.json().catch(() => ({}));
+    return NextResponse.json(
+      { error: 'ElevenLabs fetch error', raw: err },
+      { status: res.status },
+    );
   }
 
-  // Map ElevenLabs response to ElevenLabsCallResult shape expected by the UI
-  return NextResponse.json({
-    conversation_id: data.conversation_id ?? callId,
-    status: data.status === 'done' ? 'done' : data.status === 'failed' ? 'failed' : 'processing',
-    transcript: data.transcript ?? [],
-    metadata: data.metadata ?? {},
-    analysis: data.analysis ?? {},
-  });
+  const data: ElevenLabsCallResult = await res.json();
+  return NextResponse.json(data);
 }
