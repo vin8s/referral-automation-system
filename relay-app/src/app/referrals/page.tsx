@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
 import { EmptyState } from '@/components/shared/EmptyState';
@@ -104,12 +104,19 @@ function ReferralTable({
 
 // ── Referrals page ────────────────────────────────────────────────────────────
 export default function ReferralsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [stateFilter, setStateFilter] = useState('all');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'id', dir: 'desc' });
   const [bookedOpen, setBookedOpen] = useState(false);
+
+  // Sync search state when URL param changes (e.g. TopBar navigation)
+  useEffect(() => {
+    setSearch(searchParams.get('q') ?? '');
+  }, [searchParams]);
 
   useEffect(() => { getReferrals().then(setReferrals); }, []);
 
@@ -139,12 +146,7 @@ export default function ReferralsPage() {
     if (urgentOnly) rows = rows.filter(r => r.priority === 'urgent');
     if (search) {
       const q = search.toLowerCase();
-      rows = rows.filter(r =>
-        r.patient.name.toLowerCase().includes(q) ||
-        r.reason.toLowerCase().includes(q) ||
-        r.referringProvider.toLowerCase().includes(q) ||
-        r.id.toLowerCase().includes(q)
-      );
+      rows = rows.filter(r => r.patient.name.toLowerCase().includes(q));
     }
     return applySort(rows);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -177,7 +179,13 @@ export default function ReferralsPage() {
           <Icon name="search" size={13} />
           <input
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => {
+              const v = e.target.value;
+              setSearch(v);
+              const params = new URLSearchParams(searchParams.toString());
+              if (v) params.set('q', v); else params.delete('q');
+              router.replace(`/referrals?${params.toString()}`, { scroll: false });
+            }}
             placeholder="Search patient, reason, provider…"
             style={{ border: 0, background: 'transparent', outline: 'none', flex: 1, fontSize: 13, color: 'var(--relay-ink)', fontFamily: 'inherit' }}
           />

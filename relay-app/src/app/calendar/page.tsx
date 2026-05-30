@@ -46,17 +46,22 @@ function isSameDay(a: Date, b: Date): boolean {
 }
 
 function parseEventDate(dayStr: string, timeStr: string): Date {
-  // dayStr: "Mon Apr 14" | "Wed May 6"
+  // Standard format: "Mon Apr 14" | "Wed May 6"
   const parts = dayStr.trim().split(' ');
   const month = MONTH_SHORT.indexOf(parts[1]);
   const day = parseInt(parts[2], 10);
-  const m = timeStr.toLowerCase().match(/^(\d+):(\d+)(am|pm)$/);
-  if (!m) return new Date(2026, month, day, 9, 0);
-  let h = parseInt(m[1], 10);
-  const min = parseInt(m[2], 10);
-  if (m[3] === 'pm' && h !== 12) h += 12;
-  if (m[3] === 'am' && h === 12) h = 0;
-  return new Date(2026, month, day, h, min);
+  if (month !== -1 && !isNaN(day)) {
+    const m = timeStr.toLowerCase().match(/(\d+):(\d+)\s*(am|pm)/);
+    if (!m) return new Date(2026, month, day, 9, 0);
+    let h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    if (m[3] === 'pm' && h !== 12) h += 12;
+    if (m[3] === 'am' && h === 12) h = 0;
+    return new Date(2026, month, day, h, min);
+  }
+  // Fallback for non-standard strings (e.g. ElevenLabs-returned "June 8, 2026")
+  const fallback = new Date(dayStr);
+  return isNaN(fallback.getTime()) ? new Date(PROTOTYPE_TODAY) : fallback;
 }
 
 function formatHour(h: number): string {
@@ -141,10 +146,11 @@ function FilterDropdown({
 
 // ── Appointment chip ──────────────────────────────────────────────────────────
 
-function ApptChip({ event, compact, onClick }: {
+function ApptChip({ event, compact, onClick, highlighted }: {
   event: CalendarEvent;
   compact?: boolean;
   onClick?: () => void;
+  highlighted?: boolean;
 }) {
   const colors = event.isShadow ? null : (PROVIDER_COLORS[event.provider] ?? FALLBACK_COLOR);
   return (
@@ -157,6 +163,11 @@ function ApptChip({ event, compact, onClick }: {
           background: colors.bg,
           borderColor: colors.border,
           color: colors.fg,
+        } : {}),
+        ...(highlighted ? {
+          outline: '2px solid var(--relay-accent)',
+          outlineOffset: 1,
+          boxShadow: '0 0 0 4px var(--relay-accent-100)',
         } : {}),
       }}
     >
@@ -237,6 +248,11 @@ export default function CalendarPage() {
   const [providers, setProviders] = useState<string[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
   const [activeModal, setActiveModal] = useState<CalendarEvent | null>(null);
+  const [patientSearch, setPatientSearch] = useState('');
+  const [patientSearchOpen, setPatientSearchOpen] = useState(false);
+  const [highlightedReferralId, setHighlightedReferralId] = useState<string | null>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const minWeekStart = getWeekStart(addDays(PROTOTYPE_TODAY, -28));
   const maxWeekStart = (() => {
@@ -295,6 +311,35 @@ export default function CalendarPage() {
     setSelectedDay(new Date(PROTOTYPE_TODAY));
     setView('week');
   }
+
+  // Close patient search dropdown on outside click
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setPatientSearchOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
+  function jumpToEvent(event: CalendarEvent) {
+    const date = parseEventDate(event.day, event.time);
+    setWeekStart(getWeekStart(date));
+    setSelectedDay(date);
+    setPatientSearch('');
+    setPatientSearchOpen(false);
+    setHighlightedReferralId(event.referralId);
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightedReferralId(null), 2500);
+  }
+
+  const trimmedSearch = patientSearch.trim().toLowerCase();
+  const patientSuggestions = trimmedSearch.length > 0
+    ? events
+        .filter(e => !e.isShadow && e.patient.toLowerCase().includes(trimmedSearch))
+        .slice(0, 6)
+    : [];
 
   const weekEnd = addDays(weekStart, 4);
   const sameMonth = weekStart.getMonth() === weekEnd.getMonth();
@@ -366,6 +411,85 @@ export default function CalendarPage() {
         <span style={{ fontSize: 14.5, fontWeight: 600, color: 'var(--relay-ink)', marginLeft: 4 }}>
           {weekLabel}
         </span>
+
+        {/* Patient search */}
+        <div ref={searchContainerRef} style={{ position: 'relative', flex: '0 1 220px' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '5px 9px',
+            background: 'var(--relay-tint)',
+            border: '1px solid var(--relay-hairline)',
+            borderRadius: 7,
+          }}>
+            <Icon name="search" size={13} style={{ color: 'var(--relay-ink-3)', flexShrink: 0 }} />
+            <input
+              value={patientSearch}
+              onChange={e => { setPatientSearch(e.target.value); setPatientSearchOpen(true); }}
+              onFocus={() => { if (patientSearch.trim()) setPatientSearchOpen(true); }}
+              onKeyDown={e => {
+                if (e.key === 'Escape') { setPatientSearch(''); setPatientSearchOpen(false); }
+                if (e.key === 'Enter' && patientSuggestions.length > 0) jumpToEvent(patientSuggestions[0]);
+              }}
+              placeholder="Find patient…"
+              autoComplete="off"
+              style={{ border: 0, background: 'transparent', outline: 'none', flex: 1, fontSize: 12.5, color: 'var(--relay-ink)', fontFamily: 'inherit', minWidth: 0 }}
+            />
+            {patientSearch && (
+              <button
+                onMouseDown={e => { e.preventDefault(); setPatientSearch(''); setPatientSearchOpen(false); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: 'var(--relay-ink-3)' }}
+              >
+                <Icon name="x" size={11} />
+              </button>
+            )}
+          </div>
+
+          {patientSearchOpen && patientSuggestions.length > 0 && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+              background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
+              borderRadius: 9, boxShadow: 'var(--relay-shadow-pop)', overflow: 'hidden', zIndex: 200,
+              minWidth: 260,
+            }}>
+              {patientSuggestions.map((e, i) => {
+                const colors = PROVIDER_COLORS[e.provider] ?? FALLBACK_COLOR;
+                const nameIdx = e.patient.toLowerCase().indexOf(trimmedSearch);
+                return (
+                  <div
+                    key={`${e.referralId}-${i}`}
+                    onMouseDown={ev => { ev.preventDefault(); jumpToEvent(e); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer',
+                      borderBottom: i < patientSuggestions.length - 1 ? '1px solid var(--relay-hairline)' : 'none',
+                    }}
+                    onMouseEnter={ev => (ev.currentTarget.style.background = 'var(--relay-tint)')}
+                    onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{
+                      width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                      background: colors.bg, border: `1px solid ${colors.border}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10.5, fontWeight: 700, color: colors.fg,
+                    }}>
+                      {e.patient.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--relay-ink)', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {nameIdx === -1 ? e.patient : (
+                          <>{e.patient.slice(0, nameIdx)}<strong>{e.patient.slice(nameIdx, nameIdx + trimmedSearch.length)}</strong>{e.patient.slice(nameIdx + trimmedSearch.length)}</>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--relay-ink-3)', lineHeight: 1.3, marginTop: 1 }}>
+                        {e.day} · {e.time} · {e.provider}
+                      </div>
+                    </div>
+                    <Icon name="arrow" size={11} style={{ color: 'var(--relay-ink-4)', flexShrink: 0 }} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         <span style={{ flex: 1 }} />
 
@@ -449,6 +573,7 @@ export default function CalendarPage() {
                         key={`${e.referralId}-${i}`}
                         event={e}
                         onClick={!e.isShadow ? () => setActiveModal(e) : undefined}
+                        highlighted={highlightedReferralId === e.referralId}
                       />
                     ))}
                   </div>
@@ -518,6 +643,7 @@ export default function CalendarPage() {
                       key={`${e.referralId}-${i}`}
                       event={e}
                       onClick={!e.isShadow ? () => setActiveModal(e) : undefined}
+                      highlighted={highlightedReferralId === e.referralId}
                     />
                   ))}
                 </div>

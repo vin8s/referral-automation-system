@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   }
 
   const { toNumber, referralId, dynamicVariables } = body;
-  if (!toNumber) {
+  if (!toNumber) {1
     return NextResponse.json({ error: 'toNumber is required' }, { status: 400 });
   }
 

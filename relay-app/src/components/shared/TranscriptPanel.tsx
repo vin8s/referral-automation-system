@@ -5,6 +5,10 @@ import type { TranscriptTurn } from '@/lib/types';
 
 interface TranscriptData {
   turns?: TranscriptTurn[];
+  patient?: string;
+  call?: string;
+  disclosure?: boolean;
+  summary?: string;
 }
 
 interface TranscriptPanelProps {

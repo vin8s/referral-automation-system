@@ -225,21 +225,6 @@ function EscalationPopover({ alerts }: { alerts: UrgentAlert[] }) {
 }
 
 // ── AI call log card ──────────────────────────────────────────────────────────
-const OUTCOME_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
-  'No Answer':            { bg: 'var(--relay-tint)',       fg: 'var(--relay-ink-3)',      label: 'No answer'   },
-  'Voicemail Left':       { bg: 'var(--st-queued-bg)',     fg: 'var(--st-queued-fg)',     label: 'Voicemail'   },
-  'Call Back Requested':  { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',   label: 'Call back'   },
-  'Identity Verified':    { bg: 'var(--st-queued-bg)',     fg: 'var(--st-queued-fg)',     label: 'ID verified' },
-  'Interested':           { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',   label: 'Interested'  },
-  'Appointment Accepted': { bg: 'var(--st-accepted-bg)',  fg: 'var(--st-accepted-fg)',   label: 'Accepted'    },
-  'Booked':               { bg: 'var(--st-booked-bg)',    fg: 'var(--st-booked-fg)',     label: 'Booked'      },
-  'Transferred to Staff': { bg: 'var(--st-outreach-bg)', fg: 'var(--st-outreach-fg)',   label: 'Transferred' },
-  'Declined Referral':    { bg: 'var(--st-lost-bg)',      fg: 'var(--st-lost-fg)',       label: 'Declined'    },
-  'Wrong Number':         { bg: 'var(--st-lost-bg)',      fg: 'var(--st-lost-fg)',       label: 'Wrong #'     },
-  'Language Barrier':     { bg: 'var(--st-escalated-bg)', fg: 'var(--st-escalated-fg)', label: 'Lang barrier'},
-  'Disconnected':         { bg: 'var(--st-lost-bg)',      fg: 'var(--st-lost-fg)',       label: 'Disconnected'},
-  'Escalated':            { bg: 'var(--st-escalated-bg)', fg: 'var(--st-escalated-fg)', label: 'Escalated'   },
-};
 
 function AICallLogCard({ entries }: { entries: CallLogEntry[] }) {
   const recent = entries.slice(0, 7);
@@ -258,7 +243,6 @@ function AICallLogCard({ entries }: { entries: CallLogEntry[] }) {
       </div>
       <div style={{ gap: 0 }}>
         {recent.map((entry, i) => {
-          const style = OUTCOME_STYLE[entry.outcome] ?? OUTCOME_STYLE['No Answer'];
           const key = `${entry.referralId}-${entry.attempt}`;
           const isExpanded = expandedKey === key;
           const isLast = i === recent.length - 1;
@@ -292,13 +276,7 @@ function AICallLogCard({ entries }: { entries: CallLogEntry[] }) {
                     {entry.timestamp} · {entry.duration !== '—' ? entry.duration : '—'}
                   </div>
                 </div>
-                <span style={{
-                  fontSize: 11, fontWeight: 500,
-                  padding: '2px 7px', borderRadius: 99,
-                  background: style.bg, color: style.fg, flexShrink: 0,
-                }}>
-                  {style.label}
-                </span>
+                <StatePill state={entry.referralState} />
                 <span style={{
                   color: 'var(--relay-ink-4)', display: 'inline-flex',
                   transform: isExpanded ? 'rotate(180deg)' : 'none',

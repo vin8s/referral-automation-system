@@ -8,7 +8,10 @@ import {
   addCallAttempt,
   updateReferralState,
   updateReferral,
+  createCapturedSlot,
+  patchLatestTranscript,
 } from "@/lib/data";
+import { useActiveCall } from "@/contexts/ActiveCallContext";
 import { StatePill } from "@/components/shared/StatePill";
 import { StatePicker } from "@/components/shared/StatePicker";
 import { Avatar } from "@/components/shared/Avatar";
@@ -86,7 +89,17 @@ function EditField({
 function outcomeLabel(result: ElevenLabsCallResult): Attempt["outcome"] {
   const s = result.analysis?.call_successful;
   const reason = result.metadata?.termination_reason ?? "";
-  if (s === "success") return "Appointment Accepted";
+  const dcr = result.analysis?.data_collection_results ?? {};
+
+  // If an appointment date or time was captured, the patient accepted — regardless
+  // of how ElevenLabs scored call_successful (e.g. follow-up questions at end of call
+  // can cause ElevenLabs to mark the call as failure/unknown even when booked).
+  const appointmentCaptured = !!(
+    (dcr.appointment_date ?? dcr.appointment_day ?? dcr.date)?.value ||
+    (dcr.appointment_time ?? dcr.time)?.value
+  );
+  if (appointmentCaptured || s === "success") return "Appointment Accepted";
+
   if (reason === "agent_ended_call" || reason === "user_ended_call")
     return "Booked";
   if (reason === "voicemail") return "Voicemail Left";
@@ -116,6 +129,132 @@ function formatDuration(secs?: number): string {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+const MONTH_S = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DAY_S   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MONTH_LONG: Record<string, number> = {
+  january:0, february:1, march:2, april:3, may:4, june:5,
+  july:6, august:7, september:8, october:9, november:10, december:11,
+  jan:0, feb:1, mar:2, apr:3, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11,
+};
+
+// Scan free-form text (e.g. transcript_summary) for the first recognizable date.
+// Returns "Mon Jun 8" format, or undefined if nothing found.
+function extractDateFromText(text: string): string | undefined {
+  if (!text) return undefined;
+  const lower = text.toLowerCase();
+  // Sort month names longest-first so "march" wins over "mar"
+  const entries = (Object.entries(MONTH_LONG) as [string, number][])
+    .sort((a, b) => b[0].length - a[0].length);
+  let month = -1;
+  let matchEnd = -1;
+  let bestPos = Infinity;
+  for (const [name, idx] of entries) {
+    const pos = lower.indexOf(name);
+    // Take the earliest occurrence; if tied on position, longer name wins (entries are sorted longest-first)
+    if (pos !== -1 && pos < bestPos) {
+      month = idx;
+      matchEnd = pos + name.length;
+      bestPos = pos;
+    }
+  }
+  if (month === -1) return undefined;
+  // Look for a day number in the ~25 chars after the month name
+  const after = text.slice(matchEnd, matchEnd + 25);
+  const m = after.match(/\b(\d{1,2})(st|nd|rd|th)?\b/);
+  if (!m) return undefined;
+  const dayNum = parseInt(m[1], 10);
+  if (isNaN(dayNum) || dayNum < 1 || dayNum > 31) return undefined;
+  const d = new Date(2026, month, dayNum);
+  if (isNaN(d.getTime())) return undefined;
+  return `${DAY_S[d.getDay()]} ${MONTH_S[d.getMonth()]} ${d.getDate()}`;
+}
+
+// Scan agent turns (latest-first) for the booking confirmation statement and
+// extract the confirmed date and time. The agent always says something like
+// "Your appointment is confirmed for Tuesday, June 2nd at 4:00 PM" — this is
+// more reliable than data_collection_results, which tends to pick the first
+// date mentioned rather than the patient-confirmed one.
+function extractConfirmedSlotFromTranscript(
+  transcript: { role: string; message: string }[]
+): { day?: string; time?: string } {
+  const agentTurns = [...transcript].reverse().filter(t => t.role === "agent");
+  for (const turn of agentTurns) {
+    const msg = turn.message;
+    if (/confirmed\s+for|booked\s+for|scheduled\s+for|appointment.*for/i.test(msg)) {
+      const day = extractDateFromText(msg);
+      const timeMatch = msg.match(/\b(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))\b/);
+      const time = timeMatch ? timeMatch[1].replace(/\s+/, " ").toUpperCase() : undefined;
+      if (day || time) return { day, time };
+    }
+  }
+  return {};
+}
+
+// Convert any date string ElevenLabs might return to "Mon Jun 8" calendar format.
+function normalizeSlotDay(raw: string): string {
+  if (!raw) return raw;
+  // Already correct format "Mon Jun 8"
+  if (/^[A-Za-z]{3} [A-Za-z]{3} \d{1,2}$/.test(raw)) return raw;
+
+  // Try native parsing first ("June 8, 2026", "2026-06-08", etc.)
+  const native = new Date(raw);
+  if (!isNaN(native.getTime())) {
+    return `${DAY_S[native.getDay()]} ${MONTH_S[native.getMonth()]} ${native.getDate()}`;
+  }
+
+  // Fallback: extract month name + day number from natural language
+  // e.g. "Monday, June 8th" | "Monday June 8" | "June 8th"
+  const lower = raw.toLowerCase();
+  let month = -1;
+  for (const [name, idx] of Object.entries(MONTH_LONG)) {
+    if (lower.includes(name)) { month = idx; break; }
+  }
+  const dayMatch = raw.match(/\b(\d{1,2})(st|nd|rd|th)?\b/);
+  const dayNum = dayMatch ? parseInt(dayMatch[1], 10) : NaN;
+
+  if (month !== -1 && !isNaN(dayNum)) {
+    // Appointments are always in the future relative to the prototype anchor (2026)
+    const d = new Date(2026, month, dayNum);
+    if (!isNaN(d.getTime())) {
+      return `${DAY_S[d.getDay()]} ${MONTH_S[d.getMonth()]} ${d.getDate()}`;
+    }
+  }
+
+  return raw; // give up — calendar will filter it out
+}
+
+// Returns n upcoming weekday slots with pre-formatted spoken labels so the agent
+// mirrors the exact format ("Tuesday, June 11th at 4:00 PM") when reading them aloud.
+function buildUpcomingSlots(n: number) {
+  const slots: { spoken_date: string; weekday: string; date: string; times: string[]; spoken_options: string[] }[] = [];
+  const cursor = new Date();
+  cursor.setDate(cursor.getDate() + 1);
+  cursor.setHours(0, 0, 0, 0);
+  while (slots.length < n) {
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) {
+      const weekday = cursor.toLocaleDateString("en-US", { weekday: "long" });
+      const monthDay = cursor.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+      const year = cursor.getFullYear();
+      const day = cursor.getDate();
+      const suffix = day === 1 || day === 21 || day === 31 ? "st"
+        : day === 2 || day === 22 ? "nd"
+        : day === 3 || day === 23 ? "rd" : "th";
+      const spoken_date = `${weekday}, ${monthDay.replace(/\d+/, `${day}${suffix}`)}`;
+      const times = ["9:00 AM", "10:30 AM", "2:00 PM", "4:00 PM"];
+      slots.push({
+        spoken_date,
+        weekday,
+        date: `${monthDay}, ${year}`,
+        times,
+        spoken_options: times.map((t) => `${spoken_date} at ${t}`),
+      });
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return slots;
 }
 
 // ── Call confirmation modal ───────────────────────────────────────────────────
@@ -407,12 +546,20 @@ export default function ReferralDetailPage() {
   const [editComment, setEditComment] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const { setActiveCall } = useActiveCall();
+  const setActiveCallRef = useRef(setActiveCall);
+  useEffect(() => { setActiveCallRef.current = setActiveCall; }, [setActiveCall]);
+
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollCountRef = useRef(0);
+  const transcriptRetryRef = useRef(0);
+  const isMountedRef = useRef(true);
+  const referralRef = useRef<Referral | null>(null);
 
   const loadReferral = useCallback(async () => {
     const r = await getReferralById(id);
     setReferral(r);
+    referralRef.current = r;
     setLoading(false);
   }, [id]);
 
@@ -420,10 +567,15 @@ export default function ReferralDetailPage() {
     loadReferral();
   }, [loadReferral]);
 
-  // Clear polling on unmount
+  // Keep referralRef in sync so background poll can access it after unmount
+  useEffect(() => {
+    referralRef.current = referral;
+  }, [referral]);
+
+  // Mark unmounted — do NOT cancel the poll so background saves still complete
   useEffect(
     () => () => {
-      if (pollRef.current) clearTimeout(pollRef.current);
+      isMountedRef.current = false;
     },
     [],
   );
@@ -477,6 +629,20 @@ export default function ReferralDetailPage() {
     try {
       const [firstName, ...rest] = referral.patient.name.split(" ");
       const lastName = rest.join(" ");
+
+      // Build current date and upcoming slot options with accurate day-of-week labels
+      const todayDate = new Date().toLocaleDateString("en-US", {
+        weekday: "long", year: "numeric", month: "long", day: "numeric",
+      });
+      const upcomingSlots = buildUpcomingSlots(6);
+      // Summary uses the pre-formatted spoken style so the agent reads dates the same way
+      const available_slots_summary = upcomingSlots
+        .map((s) => `${s.spoken_date}: ${s.times.join(", ")}`)
+        .join(" | ");
+      const available_slots_json = JSON.stringify(upcomingSlots);
+      const date_format_instruction =
+        "When mentioning any appointment date or time, always say the full day of the week and the date together — for example 'Tuesday, June 11th at 4:00 PM', never just 'June 11th at 4 PM' or 'Tuesday at 4 PM'.";
+
       const res = await fetch("/api/calls/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -501,8 +667,10 @@ export default function ReferralDetailPage() {
             preferred_location: referral.location,
             practice_name: "Bay Cardiology",
             practice_phone_number: "",
-            available_slots_summary: "",
-            available_slots_json: "[]",
+            today_date: todayDate,
+            available_slots_summary,
+            available_slots_json,
+            date_format_instruction,
           },
         }),
       });
@@ -522,6 +690,10 @@ export default function ReferralDetailPage() {
       if (data.callId) {
         setCallId(data.callId);
         setCallPhase("polling");
+        transcriptRetryRef.current = 0;
+        if (referral) {
+          setActiveCallRef.current({ callId: data.callId, referralId: referral.id, patientName: referral.patient.name });
+        }
         schedulePoll(data.callId);
       } else {
         setCallError("No call ID returned from ElevenLabs");
@@ -539,9 +711,9 @@ export default function ReferralDetailPage() {
 
   async function poll(cid: string) {
     pollCountRef.current += 1;
-    // Give up after ~5 minutes (100 polls × 3s) and force the result to save
+    // Give up after ~5 minutes (100 polls × 3s)
     if (pollCountRef.current > 100) {
-      setCallPhase("done");
+      if (isMountedRef.current) setCallPhase("done");
       return;
     }
     try {
@@ -552,8 +724,24 @@ export default function ReferralDetailPage() {
       }
       const data: ElevenLabsCallResult = await res.json();
       if (data.status === "done" || data.status === "failed") {
-        setCallResult(data);
-        setCallPhase("done");
+        // Retry up to 5× if status is done but transcript hasn't populated yet
+        if (
+          data.status === "done" &&
+          (!data.transcript || data.transcript.length === 0) &&
+          transcriptRetryRef.current < 15
+        ) {
+          transcriptRetryRef.current += 1;
+          schedulePoll(cid);
+          return;
+        }
+        if (isMountedRef.current) {
+          setCallResult(data);
+          setCallPhase("done");
+        } else {
+          // Component unmounted — save directly without React state
+          const ref = referralRef.current;
+          if (ref) persistCallResult(data, ref);
+        }
       } else {
         schedulePoll(cid);
       }
@@ -562,31 +750,50 @@ export default function ReferralDetailPage() {
     }
   }
 
-  async function saveCallToTimeline(
+  function buildTurns(result: ElevenLabsCallResult) {
+    return (result.transcript ?? []).map((t) => ({
+      who: (t.role === "agent" ? "ai" : "patient") as "ai" | "patient",
+      text: t.message,
+    }));
+  }
+
+  // Core save logic — no React state, safe to call after unmount. Returns the turns that were saved.
+  async function persistCallResult(
     result: ElevenLabsCallResult,
     currentReferral: Referral,
-  ) {
-    setSavingCall(true);
-
+  ): Promise<{ who: "ai" | "patient"; text: string }[]> {
     const now = new Date().toLocaleString("en-US", {
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
     });
-
     const duration = formatDuration(result.metadata?.call_duration_secs);
-    const summary =
-      result.analysis?.transcript_summary ?? "AI call · no summary available";
+    const summary = result.analysis?.transcript_summary ?? "AI call · no summary available";
     const outcome = outcomeLabel(result);
     const newState = OUTCOME_TO_STATE[outcome] ?? "In Progress";
+    const turns = buildTurns(result);
+    const dcr = result.analysis?.data_collection_results ?? {};
 
-    const turns = (result.transcript ?? []).map((t) => ({
-      who: (t.role === "agent" ? "ai" : "patient") as "ai" | "patient",
-      text: t.message,
-    }));
+    // Primary: extract from the agent's final confirmation statement in the
+    // transcript ("Your appointment is confirmed for Monday, June 1st at 2:00 PM").
+    // This is more reliable than data_collection, which frequently picks the
+    // first date offered rather than the one the patient actually confirmed.
+    const fromTranscript = outcome === "Appointment Accepted"
+      ? extractConfirmedSlotFromTranscript(result.transcript ?? [])
+      : {};
 
-    await Promise.all([
+    // Secondary: free-text extraction from the AI-generated summary (more reliable than DCR,
+    // which frequently captures the first date offered rather than the one the patient confirmed).
+    // Tertiary: data_collection_results as last resort.
+    const rawDay = outcome === "Appointment Accepted"
+      ? String((dcr.appointment_date ?? dcr.appointment_day ?? dcr.date)?.value ?? "")
+      : "";
+    const slotDay = fromTranscript.day
+      ?? (outcome === "Appointment Accepted" ? extractDateFromText(summary) : undefined)
+      ?? (rawDay ? normalizeSlotDay(rawDay) : undefined);
+
+    const saves: Promise<unknown>[] = [
       addCallAttempt(currentReferral.id, {
         timestamp: now,
         channel: "voice" as const,
@@ -595,15 +802,102 @@ export default function ReferralDetailPage() {
         disclosurePlayed: true,
         summary,
         transcript: turns,
+        ...(slotDay ? { slotDay } : {}),
       }),
       updateReferralState(currentReferral.id, newState),
-    ]);
+    ];
 
+    if (outcome === "Appointment Accepted") {
+      const day      = slotDay ?? "To be confirmed";
+      const rawTime  = String((dcr.appointment_time ?? dcr.time)?.value ?? "");
+      const summaryTimeMatch = summary.match(/\b(\d{1,2}:\d{2}\s*(?:AM|PM)|(?:\d{1,2})\s*(?:AM|PM))\b/i);
+      const summaryTime = summaryTimeMatch
+        ? summaryTimeMatch[1].replace(/\s+/, " ").toUpperCase()
+        : undefined;
+      const time = fromTranscript.time ?? summaryTime ?? (rawTime || "TBD");
+      const provider = String((dcr.provider ?? dcr.doctor ?? dcr.physician)?.value ?? currentReferral.referringProvider ?? "TBD");
+      saves.push(createCapturedSlot(currentReferral.id, { day, time, provider }));
+    }
+
+    await Promise.all(saves);
+    setActiveCallRef.current(null);
+    return turns;
+  }
+
+  // Patch the last attempt in local React state with a transcript that arrived late.
+  function applyLateTranscript(turns: { who: "ai" | "patient"; text: string }[]) {
+    setReferral((prev) => {
+      if (!prev || !prev.attempts.length) return prev;
+      const updated = [...prev.attempts];
+      const last = updated[updated.length - 1];
+      updated[updated.length - 1] = { ...last, transcript: turns };
+      return { ...prev, attempts: updated };
+    });
+  }
+
+  // If the transcript wasn't ready when we first saved, keep polling ElevenLabs and
+  // patch state + Supabase as soon as it arrives (up to ~2 min).
+  async function lateLoadTranscript(conversationId: string, referralId: string) {
+    for (let i = 0; i < 8; i++) {
+      await new Promise<void>((r) => setTimeout(r, 10_000));
+      try {
+        const res = await fetch(`/api/calls/${conversationId}`);
+        if (!res.ok) continue;
+        const data: ElevenLabsCallResult = await res.json();
+        const turns = buildTurns(data);
+        if (turns.length > 0) {
+          if (isMountedRef.current) applyLateTranscript(turns);
+          patchLatestTranscript(referralId, turns);
+          break;
+        }
+      } catch {
+        // continue
+      }
+    }
+  }
+
+  async function saveCallToTimeline(
+    result: ElevenLabsCallResult,
+    currentReferral: Referral,
+  ) {
+    setSavingCall(true);
+    const turns = await persistCallResult(result, currentReferral);
     setSavingCall(false);
     setCallPhase("idle");
     setCallResult(null);
     setCallId(null);
-    await loadReferral();
+
+    // Update local state directly from the call result — don't depend on a
+    // Supabase round-trip, which can fail or race against stale data.
+    const now = new Date().toLocaleString("en-US", {
+      month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+    const outcome = outcomeLabel(result);
+    const newState = OUTCOME_TO_STATE[outcome] ?? "In Progress";
+    const newAttempt: Attempt = {
+      n: currentReferral.attempts.length + 1,
+      timestamp: now,
+      channel: "voice" as const,
+      outcome,
+      duration: formatDuration(result.metadata?.call_duration_secs),
+      disclosurePlayed: true,
+      summary: result.analysis?.transcript_summary ?? "AI call · no summary available",
+      transcript: turns,
+    };
+
+    setReferral((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        state: newState,
+        attempts: [...prev.attempts, newAttempt],
+      };
+    });
+
+    // If ElevenLabs transcript wasn't ready yet, poll until it arrives
+    if (turns.length === 0 && result.conversation_id) {
+      lateLoadTranscript(result.conversation_id, currentReferral.id);
+    }
   }
 
   // Auto-save immediately when a call result arrives — no manual button needed
@@ -1244,6 +1538,14 @@ export default function ReferralDetailPage() {
                             Attempt #{attempt.n} ·{" "}
                             {attempt.channel === "voice" ? "Voice" : "SMS"} ·{" "}
                             {attempt.outcome}
+                            {attempt.outcome === "Appointment Accepted" &&
+                              (() => {
+                                const day =
+                                  attempt.slotDay ??
+                                  r.bookedAppointment?.day ??
+                                  r.capturedSlot?.day;
+                                return day ? ` — ${day}` : null;
+                              })()}
                           </div>
                           {hasTranscript && (
                             <Icon

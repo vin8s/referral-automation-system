@@ -39,6 +39,7 @@ export interface Attempt {
   disclosurePlayed: boolean;
   summary: string;
   transcript: TranscriptTurn[];
+  slotDay?: string;
 }
 
 export interface AuditEntry {
@@ -137,6 +138,7 @@ export interface CallLogEntry {
   hasTranscript: boolean;
   escalated: boolean;
   disclosurePlayed: boolean;
+  referralState: ReferralState;
 }
 
 export interface CalendarEvent {
