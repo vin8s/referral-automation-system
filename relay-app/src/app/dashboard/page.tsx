@@ -5,17 +5,103 @@ import Link from 'next/link';
 import {
   getConfirmQueue, getPipeline, getReferrals,
   getUrgentAlerts,
-  getCallLog, getCalendarEvents,
+  getCallLog, getCalendarEvents, getDashboardCallActivity,
 } from '@/lib/data';
 import { PageHead } from '@/components/layout/PageHead';
 import { StatePill } from '@/components/shared/StatePill';
 import { Funnel } from '@/components/shared/Funnel';
 import { Icon } from '@/components/shared/Icon';
 import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList';
+import { TranscriptPanel } from '@/components/shared/TranscriptPanel';
 import type {
   ConfirmQueueItem, PipelineCount, Referral,
   CallLogEntry, CalendarEvent, UrgentAlert, DashboardFunnelStep,
 } from '@/lib/types';
+
+// ── Referral quick-view modal ─────────────────────────────────────────────────
+function ReferralQuickViewModal({ referral, onClose }: { referral: Referral; onClose: () => void }) {
+  const r = referral;
+  const lastAttempt = r.attempts[r.attempts.length - 1];
+
+  return (
+    <div className="modal-shade" onClick={onClose}>
+      <div className="relay-modal" style={{ width: 700, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+        <div className="relay-modal-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>{r.patient.name}</h3>
+            <StatePill state={r.state} />
+            {r.priority === 'urgent' && (
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', background: '#fee2e2', padding: '2px 8px', borderRadius: 99 }}>Urgent</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Link href={`/referrals/${r.id}`} onClick={onClose}>
+              <button className="btn btn-sm btn-primary">Open full profile <Icon name="arrow" size={11} /></button>
+            </Link>
+            <button className="btn btn-sm btn-ghost" onClick={onClose}><Icon name="x" size={13} /></button>
+          </div>
+        </div>
+
+        <div className="relay-modal-body" style={{ overflowY: 'auto' }}>
+          {/* Two-column facts */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 24px', marginBottom: 16 }}>
+            {[
+              ['Age / sex', `${r.patient.age} · ${r.patient.sex === 'F' ? 'Female' : 'Male'}`],
+              ['Reason', r.reason],
+              ['Language', r.patient.language],
+              ['Referring provider', r.referringProvider],
+              ['Insurance', r.patient.insurance],
+              ['Received', r.referralTime],
+              ['Attempts', `${r.attempts.length} attempt${r.attempts.length !== 1 ? 's' : ''}`],
+              ['Referral ID', r.id],
+            ].map(([label, value]) => (
+              <div key={label} style={{ display: 'flex', gap: 8, padding: '5px 0', borderBottom: '1px solid var(--relay-hairline)', alignItems: 'baseline' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--relay-ink-3)', flexShrink: 0, width: 120 }}>{label}</span>
+                <span style={{ fontSize: 13, color: 'var(--relay-ink-2)' }}>{value}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Captured slot */}
+          {r.capturedSlot && (
+            <div style={{ background: 'var(--relay-accent-50)', border: '1px solid var(--relay-accent-200)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--relay-accent-700)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Captured slot — pending confirmation</div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>
+                <Icon name="cal" size={13} /> {r.capturedSlot.day} · {r.capturedSlot.time} · {r.capturedSlot.provider}
+              </div>
+            </div>
+          )}
+
+          {/* Booked appointment */}
+          {r.bookedAppointment && (
+            <div style={{ background: 'var(--st-booked-bg)', border: '1px solid var(--relay-accent-200)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--relay-accent-700)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Confirmed appointment</div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>
+                <Icon name="cal" size={13} /> {r.bookedAppointment.day} · {r.bookedAppointment.time} · {r.bookedAppointment.provider}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--relay-ink-3)', marginTop: 3 }}>
+                Confirmed by {r.bookedAppointment.confirmedBy} · {r.bookedAppointment.confirmedAt}
+              </div>
+            </div>
+          )}
+
+          {/* Last attempt transcript / summary */}
+          {lastAttempt && (
+            <TranscriptPanel
+              data={{
+                patient: r.patient.name,
+                call: `Attempt #${lastAttempt.n} · ${lastAttempt.channel === 'voice' ? 'Voice' : 'SMS'} · ${lastAttempt.duration}`,
+                disclosure: lastAttempt.disclosurePlayed,
+                summary: lastAttempt.summary,
+                turns: lastAttempt.transcript,
+              }}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Escalation popover ────────────────────────────────────────────────────────
 function EscalationPopover({ alerts }: { alerts: UrgentAlert[] }) {
@@ -157,51 +243,114 @@ const OUTCOME_STYLE: Record<string, { bg: string; fg: string; label: string }> =
 
 function AICallLogCard({ entries }: { entries: CallLogEntry[] }) {
   const recent = entries.slice(0, 7);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+
   return (
     <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div className="card-head">
         <div>
           <h3>AI call log</h3>
-          <p className="card-sub">Most recent attempts</p>
+          <p className="card-sub">Most recent attempts · click to expand</p>
         </div>
         <Link href="/calls">
           <button className="btn btn-sm btn-ghost">View all <Icon name="arrow" size={11} /></button>
         </Link>
       </div>
-      <div className="stack-tight" style={{ gap: 0 }}>
+      <div style={{ gap: 0 }}>
         {recent.map((entry, i) => {
           const style = OUTCOME_STYLE[entry.outcome] ?? OUTCOME_STYLE['No Answer'];
+          const key = `${entry.referralId}-${entry.attempt}`;
+          const isExpanded = expandedKey === key;
+          const isLast = i === recent.length - 1;
+
           return (
-            <div
-              key={`${entry.referralId}-${entry.attempt}`}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '8px 0',
-                borderBottom: i < recent.length - 1 ? '1px solid var(--relay-hairline)' : 'none',
-              }}
-            >
-              <div style={{
-                width: 28, height: 28, borderRadius: 6,
-                background: 'var(--relay-tint)', border: '1px solid var(--relay-hairline)',
-                display: 'grid', placeItems: 'center', flexShrink: 0, color: 'var(--relay-ink-3)',
-              }}>
-                <Icon name={entry.channel === 'sms' ? 'sms' : 'phone'} size={13} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {entry.patient}
+            <div key={key} style={{ borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--relay-hairline)' }}>
+              {/* Row */}
+              <div
+                onClick={() => setExpandedKey(isExpanded ? null : key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 0', cursor: 'pointer',
+                  background: isExpanded ? 'var(--relay-tint)' : 'transparent',
+                  margin: isExpanded ? '0 -16px' : undefined,
+                  paddingLeft: isExpanded ? 16 : undefined,
+                  paddingRight: isExpanded ? 16 : undefined,
+                }}
+              >
+                <div style={{
+                  width: 28, height: 28, borderRadius: 6,
+                  background: 'var(--relay-tint)', border: '1px solid var(--relay-hairline)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0, color: 'var(--relay-ink-3)',
+                }}>
+                  <Icon name={entry.channel === 'sms' ? 'sms' : 'phone'} size={13} />
                 </div>
-                <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
-                  {entry.timestamp} · {entry.duration !== '—' ? entry.duration : '—'}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {entry.patient}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
+                    {entry.timestamp} · {entry.duration !== '—' ? entry.duration : '—'}
+                  </div>
                 </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 500,
+                  padding: '2px 7px', borderRadius: 99,
+                  background: style.bg, color: style.fg, flexShrink: 0,
+                }}>
+                  {style.label}
+                </span>
+                <span style={{
+                  color: 'var(--relay-ink-4)', display: 'inline-flex',
+                  transform: isExpanded ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 150ms', flexShrink: 0,
+                }}>
+                  <Icon name="chevron" size={11} />
+                </span>
               </div>
-              <span style={{
-                fontSize: 11, fontWeight: 500,
-                padding: '2px 7px', borderRadius: 99,
-                background: style.bg, color: style.fg, flexShrink: 0,
-              }}>
-                {style.label}
-              </span>
+
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div style={{
+                  margin: '0 -16px',
+                  padding: '12px 16px 14px',
+                  background: 'var(--relay-tint)',
+                  borderTop: '1px solid var(--relay-hairline)',
+                }}>
+                  {entry.summary && (
+                    <div style={{
+                      fontSize: 12.5, color: 'var(--relay-ink-2)', lineHeight: 1.5,
+                      background: 'var(--relay-surface)', borderRadius: 6,
+                      padding: '8px 10px', marginBottom: 10,
+                      border: '1px solid var(--relay-hairline)',
+                    }}>
+                      <span style={{ fontWeight: 600, color: 'var(--relay-ink-3)', fontSize: 11 }}>AI summary · </span>
+                      {entry.summary}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--relay-ink-3)', flexWrap: 'wrap', marginBottom: 10 }}>
+                    <span>
+                      <span style={{ color: 'var(--relay-ink-4)' }}>Disclosure · </span>
+                      {entry.disclosurePlayed ? 'Played' : 'n/a'}
+                    </span>
+                    <span>
+                      <span style={{ color: 'var(--relay-ink-4)' }}>Attempt · </span>
+                      #{entry.attempt}
+                    </span>
+                    <span>
+                      <span style={{ color: 'var(--relay-ink-4)' }}>Language · </span>
+                      {entry.language}
+                    </span>
+                    {entry.escalated && (
+                      <span style={{ color: 'var(--st-escalated-fg)', fontWeight: 500 }}>⚑ Escalation raised</span>
+                    )}
+                  </div>
+                  <Link href={`/referrals/${entry.referralId}`}>
+                    <button className="btn btn-sm btn-ghost" style={{ fontSize: 12 }}>
+                      Open referral {entry.referralId} <Icon name="arrow" size={11} />
+                    </button>
+                  </Link>
+                </div>
+              )}
             </div>
           );
         })}
@@ -267,7 +416,7 @@ function UpcomingAppointmentsCard({ events }: { events: CalendarEvent[] }) {
 }
 
 // ── Recent referrals table ────────────────────────────────────────────────────
-function RecentReferralsTable({ rows }: { rows: Referral[] }) {
+function RecentReferralsTable({ rows, onRowClick }: { rows: Referral[]; onRowClick: (r: Referral) => void }) {
   return (
     <table className="tbl">
       <thead>
@@ -277,7 +426,12 @@ function RecentReferralsTable({ rows }: { rows: Referral[] }) {
       </thead>
       <tbody>
         {rows.map(r => (
-          <tr key={r.id} className={`row-clickable${r.priority === 'urgent' ? ' pri-urgent' : ''}`}>
+          <tr
+            key={r.id}
+            className={`row-clickable${r.priority === 'urgent' ? ' pri-urgent' : ''}`}
+            onClick={() => onRowClick(r)}
+            style={{ cursor: 'pointer' }}
+          >
             <td>
               <div style={{ fontWeight: 500 }}>{r.patient.name}</div>
               <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
@@ -290,7 +444,7 @@ function RecentReferralsTable({ rows }: { rows: Referral[] }) {
               {r.referralTime}
             </td>
             <td><StatePill state={r.state} /></td>
-            <td>
+            <td onClick={e => e.stopPropagation()}>
               <Link href={`/referrals/${r.id}`}>
                 <button className="btn btn-sm btn-ghost"><Icon name="arrow" size={12} /></button>
               </Link>
@@ -299,6 +453,33 @@ function RecentReferralsTable({ rows }: { rows: Referral[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+// ── Quick stats card ──────────────────────────────────────────────────────────
+function QuickStatsCard({ pipeline, callLogCount }: { pipeline: PipelineCount[]; callLogCount: number }) {
+  const active = pipeline.filter(p => p.state !== 'Booked').reduce((a, b) => a + b.count, 0);
+  const pending = pipeline.find(p => p.state === 'Pending Confirmation')?.count ?? 0;
+  const confirmed = pipeline.find(p => p.state === 'Booked')?.count ?? 0;
+
+  const stats = [
+    { label: 'Referrals active', value: active },
+    { label: 'Calls made', value: callLogCount },
+    { label: 'Slots pending', value: pending },
+    { label: 'Confirmed', value: confirmed },
+  ];
+
+  return (
+    <div className="card" style={{ flex: 'none', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {stats.map(s => (
+          <div key={s.label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--relay-ink)', lineHeight: 1.1 }}>{s.value}</span>
+            <span style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>{s.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -320,12 +501,14 @@ function PipelineFunnelCard({ steps }: { steps: DashboardFunnelStep[] }) {
 
 // ── Dashboard page ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const [queue, setQueue]         = useState<ConfirmQueueItem[]>([]);
-  const [pipeline, setPipeline]   = useState<PipelineCount[]>([]);
-  const [referrals, setReferrals] = useState<Referral[]>([]);
-  const [callLog, setCallLog]     = useState<CallLogEntry[]>([]);
-  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
-  const [alerts, setAlerts]       = useState<UrgentAlert[]>([]);
+  const [queue, setQueue]                   = useState<ConfirmQueueItem[]>([]);
+  const [pipeline, setPipeline]             = useState<PipelineCount[]>([]);
+  const [referrals, setReferrals]           = useState<Referral[]>([]);
+  const [callLog, setCallLog]               = useState<CallLogEntry[]>([]);
+  const [calEvents, setCalEvents]           = useState<CalendarEvent[]>([]);
+  const [alerts, setAlerts]                 = useState<UrgentAlert[]>([]);
+  const [callActivity, setCallActivity]     = useState<{ metrics: { label: string; value: number; sub?: string }[] } | null>(null);
+  const [selectedReferral, setSelectedReferral] = useState<Referral | null>(null);
 
   const fetchAll = useCallback(() => {
     Promise.all([
@@ -335,13 +518,15 @@ export default function DashboardPage() {
       getCallLog(),
       getCalendarEvents(),
       getUrgentAlerts(),
-    ]).then(([q, p, r, cl, ce, al]) => {
+      getDashboardCallActivity(),
+    ]).then(([q, p, r, cl, ce, al, ca]) => {
       setQueue(q);
       setPipeline(p);
       setReferrals(r);
       setCallLog(cl);
       setCalEvents(ce);
       setAlerts(al);
+      setCallActivity(ca);
     });
   }, []);
 
@@ -366,24 +551,29 @@ export default function DashboardPage() {
       </PageHead>
 
       <div className="stack">
-        {/* Row 1 — action queue + AI call log */}
+        {/* Row 1 — action queue + stats card + AI call log */}
         <div className="row" style={{ alignItems: 'stretch' }}>
-          <div className="card" style={{ flex: 2 }}>
-            <div className="card-head">
-              <div>
-                <h3>Needs your action</h3>
-                <p className="card-sub">AI-captured slots awaiting confirmation in your practice system</p>
+          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="card" style={{ flex: 'none' }}>
+              <div className="card-head">
+                <div>
+                  <h3>Needs your action</h3>
+                  <p className="card-sub">AI-captured slots awaiting confirmation in your practice system</p>
+                </div>
+                {queue.length > 0 && (
+                  <span style={{
+                    fontSize: 11.5, padding: '2px 9px', borderRadius: 99, fontWeight: 500,
+                    background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)',
+                  }}>
+                    {queue.length} pending
+                  </span>
+                )}
               </div>
-              {queue.length > 0 && (
-                <span style={{
-                  fontSize: 11.5, padding: '2px 9px', borderRadius: 99, fontWeight: 500,
-                  background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)',
-                }}>
-                  {queue.length} pending
-                </span>
-              )}
+              <div style={{ maxHeight: 208, overflowY: 'auto' }}>
+                <ActionQueueList items={queue} compact onConfirmed={handleConfirmed} />
+              </div>
             </div>
-            <ActionQueueList items={queue} compact onConfirmed={handleConfirmed} />
+            <QuickStatsCard pipeline={pipeline} callLogCount={callLog.length} />
           </div>
           <AICallLogCard entries={callLog} />
         </div>
@@ -399,12 +589,19 @@ export default function DashboardPage() {
               <button className="btn btn-sm btn-ghost">View all <Icon name="arrow" size={11} /></button>
             </Link>
           </div>
-          <RecentReferralsTable rows={referrals.slice(0, 8)} />
+          <RecentReferralsTable rows={referrals.slice(0, 8)} onRowClick={setSelectedReferral} />
         </div>
 
         {/* Row 3 — upcoming appointments */}
         <UpcomingAppointmentsCard events={calEvents} />
       </div>
+
+      {selectedReferral && (
+        <ReferralQuickViewModal
+          referral={selectedReferral}
+          onClose={() => setSelectedReferral(null)}
+        />
+      )}
     </>
   );
 }

@@ -145,8 +145,11 @@ export interface CalendarEvent {
   day: string;
   time: string;
   provider: string;
+  location: string;
+  reason: string;
   state: ReferralState;
   mirrorStatus: 'mirrored' | 'pending' | 'failed';
+  isShadow: boolean;
 }
 
 export interface PipelineCount {
@@ -228,6 +231,23 @@ export interface ElevenLabsTranscriptTurn {
   role: 'agent' | 'user';
   message: string;
   time_in_call_secs?: number;
+}
+
+export interface ReferralLogEntry {
+  referralId: string;
+  patient: string;
+  at: string;
+  type: 'ai_call' | 'manual_update' | 'system';
+  who: string;
+  what: string;
+  detail?: string;
+  channel?: Channel;
+  outcome?: string;
+  duration?: string;
+  disclosurePlayed?: boolean;
+  escalated?: boolean;
+  hasTranscript?: boolean;
+  attempt?: number;
 }
 
 export interface ElevenLabsCallResult {

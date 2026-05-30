@@ -2,23 +2,23 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { Icon } from '@/components/shared/Icon';
+import { getSidebarCounts } from '@/lib/data';
 
 interface NavItem {
   id: string;
   label: string;
   icon: string;
   href: string;
-  urgent?: number;
-  count?: number;
 }
 
 const WORKSPACE: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard',     icon: 'home',   href: '/dashboard' },
-  { id: 'alerts',    label: 'Urgent alerts', icon: 'alert',  href: '/alerts',   urgent: 1 },
-  { id: 'action',    label: 'Confirm queue', icon: 'check',  href: '/action',   count: 2 },
-  { id: 'referrals', label: 'Referrals',     icon: 'list',   href: '/referrals', count: 12 },
-  { id: 'calls',     label: 'AI call log',   icon: 'phone',  href: '/calls' },
+  { id: 'alerts',    label: 'Urgent alerts', icon: 'alert',  href: '/alerts' },
+  { id: 'action',    label: 'Confirm queue', icon: 'check',  href: '/action' },
+  { id: 'referrals', label: 'Referrals',     icon: 'list',   href: '/referrals' },
+  { id: 'calls',     label: 'Referral log',  icon: 'list',   href: '/calls' },
   { id: 'calendar',  label: 'Calendar',      icon: 'cal',    href: '/calendar' },
   { id: 'analytics', label: 'Analytics',     icon: 'chart',  href: '/analytics' },
 ];
@@ -28,7 +28,13 @@ const SYSTEM: NavItem[] = [
   { id: 'settings', label: 'Settings',  icon: 'cog',    href: '/settings' },
 ];
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+interface SidebarCounts {
+  urgentAlerts: number;
+  confirmQueue: number;
+  referrals: number;
+}
+
+function NavLink({ item, active, urgent, count }: { item: NavItem; active: boolean; urgent?: number; count?: number }) {
   return (
     <Link
       href={item.href}
@@ -36,10 +42,10 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
     >
       <Icon name={item.icon} size={15} />
       {item.label}
-      {item.urgent ? (
-        <span className="nav-count urgent">{item.urgent}</span>
-      ) : item.count ? (
-        <span className="nav-count">{item.count}</span>
+      {urgent ? (
+        <span className="nav-count urgent">{urgent}</span>
+      ) : count ? (
+        <span className="nav-count">{count}</span>
       ) : null}
     </Link>
   );
@@ -47,6 +53,11 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [counts, setCounts] = useState<SidebarCounts>({ urgentAlerts: 0, confirmQueue: 0, referrals: 0 });
+
+  useEffect(() => {
+    getSidebarCounts().then(setCounts);
+  }, [pathname]);
 
   return (
     <aside className="sb">
@@ -60,7 +71,16 @@ export function Sidebar() {
 
       <div className="sb-section">Workspace</div>
       {WORKSPACE.map(item => (
-        <NavLink key={item.id} item={item} active={pathname.startsWith(item.href)} />
+        <NavLink
+          key={item.id}
+          item={item}
+          active={pathname.startsWith(item.href)}
+          urgent={item.id === 'alerts' ? counts.urgentAlerts : undefined}
+          count={
+            item.id === 'action'    ? counts.confirmQueue :
+            item.id === 'referrals' ? counts.referrals    : undefined
+          }
+        />
       ))}
 
       <div className="sb-section">System</div>

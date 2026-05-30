@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Icon } from '@/components/shared/Icon';
-import { EmptyState } from '@/components/shared/EmptyState';
 import { confirmSlot, rejectSlot } from '@/lib/data';
 import type { ConfirmQueueItem } from '@/lib/types';
 
@@ -141,11 +140,26 @@ export function ActionQueueList({ items: incoming, compact, onConfirmed }: Actio
 
   if (items.length === 0) {
     return (
-      <EmptyState
-        icon="check"
-        title="Nothing waiting on you"
-        sub="The AI will route confirmations here as patients accept slots."
-      />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 16px 24px', gap: 10 }}>
+        {/* Bird in flight illustration */}
+        <svg width="96" height="60" viewBox="0 0 96 60" fill="none" style={{ color: 'var(--relay-accent)', opacity: 0.55 }}>
+          {/* Main bird */}
+          <path d="M48 32 Q34 18 14 24" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+          <path d="M48 32 Q62 18 82 24" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+          <ellipse cx="54" cy="28" rx="5" ry="4" fill="currentColor" opacity="0.25"/>
+          <path d="M59 27 L65 25" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          {/* Small bird left */}
+          <path d="M22 14 Q17 9 10 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+          <path d="M22 14 Q27 9 34 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+          {/* Small bird right */}
+          <path d="M70 10 Q65 5 58 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.35"/>
+          <path d="M70 10 Q75 5 82 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.35"/>
+        </svg>
+        <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--relay-ink-2)' }}>You&apos;re all caught up</div>
+        <div style={{ fontSize: 12.5, color: 'var(--relay-ink-3)', textAlign: 'center', maxWidth: 260 }}>
+          The AI will route new slots here as patients accept them.
+        </div>
+      </div>
     );
   }
 
