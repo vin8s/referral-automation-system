@@ -1,21 +1,54 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { utils as xlsxUtils, writeFileXLSX } from 'xlsx';
 import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { StatePill } from '@/components/shared/StatePill';
 import { getReferrals } from '@/lib/data';
 import { StatePicker } from '@/components/shared/StatePicker';
+import { useCallQueue } from '@/contexts/CallQueueContext';
 import type { Referral, ReferralState } from '@/lib/types';
 
-const STATE_FILTERS = [
+function exportReferrals(rows: Referral[], label: string) {
+  const data = rows.map(r => ({
+    'Referral ID':         r.id,
+    'Patient Name':        r.patient.name,
+    'Date of Birth':       r.patient.dateOfBirth,
+    'Phone':               r.patient.phone,
+    'Sex':                 r.patient.sex,
+    'Age':                 r.patient.age,
+    'Language':            r.patient.language,
+    'Insurance':           r.patient.insurance,
+    'Reason':              r.reason,
+    'Referring Provider':  r.referringProvider,
+    'Priority':            r.priority,
+    'State':               r.state,
+    'Referral Time':       r.referralTime,
+    'Location':            r.location,
+    'Attempts':            r.attempts.length,
+    'Last Summary':        r.attempts[r.attempts.length - 1]?.summary ?? '',
+  }));
+  const ws = xlsxUtils.json_to_sheet(data);
+  ws['!cols'] = Object.keys(data[0] ?? {}).map((k) =>
+    ({ wch: Math.max(k.length, ...data.map(row => String((row as Record<string,unknown>)[k] ?? '').length)) + 2 })
+  );
+  const wb = xlsxUtils.book_new();
+  xlsxUtils.book_append_sheet(wb, ws, 'Referrals');
+  const date = new Date().toISOString().slice(0, 10);
+  writeFileXLSX(wb, `relay-referrals-${label}-${date}.xlsx`);
+}
+
+const STATE_FILTERS: { value: string; label: string; dot?: string }[] = [
   { value: 'all',                  label: 'All' },
-  { value: 'Queued',               label: 'Queued' },
-  { value: 'In Progress',          label: 'In Progress' },
-  { value: 'Pending Confirmation', label: 'Pending Confirmation' },
-  { value: 'Escalated',            label: 'Escalated' },
+  { value: 'Queued',               label: 'Queued',               dot: '#3b82f6' },
+  { value: 'In Progress',          label: 'In Progress',          dot: '#0891b2' },
+  { value: 'Attempted',            label: 'Attempted',            dot: 'var(--st-attempted-fg)' },
+  { value: 'Pending Confirmation', label: 'Pending Confirmation', dot: '#6d28d9' },
+  { value: 'Escalated',            label: 'Escalated',            dot: '#dc2626' },
 ];
 
 // ── Shared referral table ─────────────────────────────────────────────────────
@@ -106,12 +139,16 @@ function ReferralTable({
 export default function ReferralsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { openQueue } = useCallQueue();
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [stateFilter, setStateFilter] = useState('all');
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
-  const [urgentOnly, setUrgentOnly] = useState(false);
   const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'id', dir: 'desc' });
   const [bookedOpen, setBookedOpen] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Sync search state when URL param changes (e.g. TopBar navigation)
   useEffect(() => {
@@ -119,6 +156,18 @@ export default function ReferralsPage() {
   }, [searchParams]);
 
   useEffect(() => { getReferrals().then(setReferrals); }, []);
+
+  // Close suggestion dropdown on outside click
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setSuggestOpen(false);
+        setActiveIdx(-1);
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, []);
 
   function handleStateChange(referralId: string, next: ReferralState) {
     setReferrals(prev =>
@@ -143,24 +192,92 @@ export default function ReferralsPage() {
   const filtered = useMemo(() => {
     let rows = active;
     if (stateFilter !== 'all') rows = rows.filter(r => r.state === stateFilter);
-    if (urgentOnly) rows = rows.filter(r => r.priority === 'urgent');
     if (search) {
       const q = search.toLowerCase();
-      rows = rows.filter(r => r.patient.name.toLowerCase().includes(q));
+      rows = rows.filter(r =>
+        r.patient.name.toLowerCase().includes(q) ||
+        r.referringProvider.toLowerCase().includes(q)
+      );
     }
     return applySort(rows);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, stateFilter, urgentOnly, search, sort]);
+  }, [active, stateFilter, search, sort]);
 
   function onSort(col: string) {
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
   }
 
+  const trimmed = search.trim().toLowerCase();
+
+  // Build suggestion list: patient name matches first, then doctor matches
+  const suggestions = useMemo(() => {
+    if (trimmed.length < 1) return [];
+    const seen = new Set<string>();
+    const results: { label: string; sub: string; referralId?: string; doctorName?: string }[] = [];
+
+    // Patient matches → navigate to referral detail
+    referrals.filter(r => r.patient.name.toLowerCase().includes(trimmed)).slice(0, 4).forEach(r => {
+      results.push({ label: r.patient.name, sub: `${r.reason} · ${r.state}`, referralId: r.id });
+    });
+
+    // Doctor matches → filter table by provider
+    const doctorHits = referrals.filter(r => r.referringProvider.toLowerCase().includes(trimmed));
+    const doctors = [...new Set(doctorHits.map(r => r.referringProvider))].slice(0, 3);
+    doctors.forEach(doc => {
+      if (!seen.has(doc)) {
+        seen.add(doc);
+        const count = doctorHits.filter(r => r.referringProvider === doc).length;
+        results.push({ label: doc, sub: `${count} referral${count !== 1 ? 's' : ''}`, doctorName: doc });
+      }
+    });
+
+    return results.slice(0, 6);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmed, referrals]);
+
+  function commitSuggestion(s: typeof suggestions[0]) {
+    setSuggestOpen(false);
+    setActiveIdx(-1);
+    if (s.referralId) {
+      router.push(`/referrals/${s.referralId}`);
+    } else if (s.doctorName) {
+      setSearch(s.doctorName);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('q', s.doctorName);
+      router.replace(`/referrals?${params.toString()}`, { scroll: false });
+    }
+  }
+
+  function highlight(text: string) {
+    if (!trimmed) return <>{text}</>;
+    const idx = text.toLowerCase().indexOf(trimmed);
+    if (idx === -1) return <>{text}</>;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <strong style={{ color: 'var(--relay-ink)' }}>{text.slice(idx, idx + trimmed.length)}</strong>
+        {text.slice(idx + trimmed.length)}
+      </>
+    );
+  }
+
   return (
     <>
       <PageHead title="Referrals" sub={`${filtered.length} of ${active.length} active referrals`}>
-        <button className="btn btn-sm"><Icon name="download" size={12} /> Export</button>
-        <button className="btn btn-sm btn-primary"><Icon name="upload" size={12} /> Ingest</button>
+        <button className="btn btn-sm btn-primary" onClick={openQueue}>
+          <Icon name="phone" size={12} /> Run Queue
+        </button>
+        <button
+          className="btn btn-sm"
+          onClick={() => exportReferrals(filtered, stateFilter === 'all' ? 'all' : stateFilter.toLowerCase().replace(/ /g, '-'))}
+          disabled={filtered.length === 0}
+          title={`Export ${filtered.length} visible referral${filtered.length !== 1 ? 's' : ''} to Excel`}
+        >
+          <Icon name="download" size={12} /> Export{filtered.length > 0 ? ` (${filtered.length})` : ''}
+        </button>
+        <Link href="/ingest">
+          <button className="btn btn-sm btn-primary"><Icon name="upload" size={12} /> Ingest</button>
+        </Link>
       </PageHead>
 
       {/* Filter bar */}
@@ -170,35 +287,153 @@ export default function ReferralsPage() {
         background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
         borderRadius: 'var(--relay-radius) var(--relay-radius) 0 0',
       }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 7,
-          padding: '5px 9px', background: 'var(--relay-tint)',
-          border: '1px solid var(--relay-hairline)', borderRadius: 7,
-          maxWidth: 280, flex: '0 1 280px',
-        }}>
-          <Icon name="search" size={13} />
-          <input
-            value={search}
-            onChange={e => {
-              const v = e.target.value;
-              setSearch(v);
-              const params = new URLSearchParams(searchParams.toString());
-              if (v) params.set('q', v); else params.delete('q');
-              router.replace(`/referrals?${params.toString()}`, { scroll: false });
-            }}
-            placeholder="Search patient, reason, provider…"
-            style={{ border: 0, background: 'transparent', outline: 'none', flex: 1, fontSize: 13, color: 'var(--relay-ink)', fontFamily: 'inherit' }}
-          />
+        {/* Search with autocomplete */}
+        <div ref={searchContainerRef} style={{ position: 'relative', flex: '0 1 260px' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '5px 9px', background: 'var(--relay-tint)',
+            border: '1px solid var(--relay-hairline)', borderRadius: 7,
+          }}>
+            <Icon name="search" size={13} />
+            <input
+              ref={searchInputRef}
+              value={search}
+              onChange={e => {
+                const v = e.target.value;
+                setSearch(v);
+                setActiveIdx(-1);
+                setSuggestOpen(true);
+                const params = new URLSearchParams(searchParams.toString());
+                if (v) params.set('q', v); else params.delete('q');
+                router.replace(`/referrals?${params.toString()}`, { scroll: false });
+              }}
+              onFocus={() => { if (search.trim()) setSuggestOpen(true); }}
+              onKeyDown={e => {
+                if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)); setSuggestOpen(true); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, -1)); }
+                else if (e.key === 'Enter') { if (activeIdx >= 0 && suggestions[activeIdx]) commitSuggestion(suggestions[activeIdx]); else setSuggestOpen(false); }
+                else if (e.key === 'Escape') { setSuggestOpen(false); setActiveIdx(-1); }
+              }}
+              placeholder="Search patient or doctor…"
+              style={{ border: 0, background: 'transparent', outline: 'none', flex: 1, fontSize: 13, color: 'var(--relay-ink)', fontFamily: 'inherit' }}
+              autoComplete="off"
+            />
+            {search && (
+              <button
+                onMouseDown={e => { e.preventDefault(); setSearch(''); setSuggestOpen(false); router.replace('/referrals', { scroll: false }); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: 'var(--relay-ink-3)' }}
+                aria-label="Clear"
+              >
+                <Icon name="x" size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Suggestion dropdown */}
+          {suggestOpen && suggestions.length > 0 && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+              background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
+              borderRadius: 10, boxShadow: 'var(--relay-shadow-pop)',
+              overflow: 'hidden', zIndex: 600, minWidth: 280,
+            }}>
+              {suggestions.map((s, i) => (
+                <div
+                  key={s.referralId ?? s.doctorName}
+                  onMouseDown={e => { e.preventDefault(); commitSuggestion(s); }}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px', cursor: 'pointer',
+                    background: i === activeIdx ? 'var(--relay-tint)' : 'transparent',
+                    borderBottom: i < suggestions.length - 1 ? '1px solid var(--relay-hairline)' : 'none',
+                  }}
+                >
+                  <div style={{
+                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                    background: s.doctorName ? 'var(--relay-tint)' : 'var(--relay-accent-100)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 600,
+                    color: s.doctorName ? 'var(--relay-ink-3)' : 'var(--relay-accent-700)',
+                  }}>
+                    {s.doctorName
+                      ? <Icon name="user" size={13} />
+                      : s.label.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--relay-ink-2)', lineHeight: 1.3 }}>
+                      {highlight(s.label)}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)', lineHeight: 1.3, marginTop: 1 }}>
+                      {s.doctorName ? `Referring provider · ${s.sub}` : s.sub}
+                    </div>
+                  </div>
+                  {s.doctorName && (
+                    <span style={{ fontSize: 11, color: 'var(--relay-ink-3)', background: 'var(--relay-tint)', padding: '2px 7px', borderRadius: 99 }}>
+                      Doctor
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {STATE_FILTERS.map(f => (
-          <button key={f.value} className={`chip${stateFilter === f.value ? ' active' : ''}`} onClick={() => setStateFilter(f.value)}>
-            {f.label}
-          </button>
-        ))}
-        <span style={{ color: 'var(--relay-ink-4)', fontSize: 13 }}>·</span>
-        <button className={`chip${urgentOnly ? ' active' : ''}`} onClick={() => setUrgentOnly(v => !v)}>
-          <Icon name="alert" size={11} /> Urgent only
-        </button>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 22, background: 'var(--relay-hairline)', flexShrink: 0 }} />
+
+        {/* Segmented control — joined buttons, active = solid teal */}
+        <div style={{
+          display: 'inline-flex',
+          border: '1px solid var(--relay-hairline)',
+          borderRadius: 8,
+          overflow: 'hidden',
+          flexShrink: 0,
+        }}>
+          {STATE_FILTERS.map((f, i) => {
+            const count = f.value === 'all'
+              ? active.length
+              : active.filter(r => r.state === f.value).length;
+            const on = stateFilter === f.value;
+            return (
+              <button
+                key={f.value}
+                onClick={() => setStateFilter(f.value)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 13px',
+                  border: 'none',
+                  borderLeft: i > 0 ? '1px solid var(--relay-hairline)' : 'none',
+                  background: on ? 'var(--relay-accent)' : 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 12.5,
+                  fontWeight: on ? 600 : 400,
+                  color: on ? '#fff' : 'var(--relay-ink-2)',
+                  fontFamily: 'inherit',
+                  whiteSpace: 'nowrap',
+                  transition: 'background 0.1s, color 0.1s',
+                }}
+              >
+                {f.dot && (
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                    background: on ? 'rgba(255,255,255,0.7)' : f.dot,
+                  }} />
+                )}
+                {f.label}
+                <span style={{
+                  fontSize: 11, fontWeight: 600, lineHeight: 1,
+                  padding: '1px 5px', borderRadius: 99,
+                  background: on ? 'rgba(255,255,255,0.22)' : 'var(--relay-tint)',
+                  color: on ? '#fff' : 'var(--relay-ink-3)',
+                  minWidth: 16, textAlign: 'center',
+                }}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
         <span style={{ flex: 1 }} />
       </div>
 

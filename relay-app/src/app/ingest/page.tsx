@@ -246,7 +246,7 @@ export default function IngestPage() {
   if (imported) {
     return (
       <>
-        <PageHead title="Ingest referrals" sub="Manual upload first · EHR + fax connectors fast-follow" />
+        <PageHead title="Ingest referrals" sub="Manually upload referrals" />
         <div className="card" style={{ textAlign: 'center', padding: 48 }}>
           <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--st-booked-bg)', display: 'grid', placeItems: 'center', margin: '0 auto 14px', color: 'var(--relay-accent)' }}>
             <Icon name="check" size={24} />
@@ -272,7 +272,7 @@ export default function IngestPage() {
     <>
       <PageHead
         title="Ingest referrals"
-        sub="Manual upload first · EHR + fax connectors fast-follow"
+        sub="Manually upload referrals"
       />
 
       {/* Drop zone */}

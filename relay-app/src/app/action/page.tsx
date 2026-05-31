@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { PageHead } from '@/components/layout/PageHead';
 import { Avatar } from '@/components/shared/Avatar';
@@ -8,6 +8,101 @@ import { Icon } from '@/components/shared/Icon';
 import { TranscriptPanel } from '@/components/shared/TranscriptPanel';
 import { getConfirmQueue, confirmSlot, rejectSlot } from '@/lib/data';
 import type { ConfirmQueueItem } from '@/lib/types';
+
+// ── Filter panel ──────────────────────────────────────────────────────────────
+
+interface Filters {
+  priority: 'all' | 'urgent';
+  provider: string;
+  sort: 'captured_asc' | 'captured_desc' | 'priority';
+}
+
+const DEFAULT_FILTERS: Filters = { priority: 'all', provider: 'all', sort: 'captured_asc' };
+
+function FilterPanel({
+  filters,
+  providers,
+  onChange,
+  onClose,
+}: {
+  filters: Filters;
+  providers: string[];
+  onChange: (f: Filters) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 50,
+        background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
+        borderRadius: 'var(--relay-radius)', boxShadow: '0 4px 16px rgba(0,0,0,.10)',
+        padding: '16px 18px', minWidth: 240, display: 'flex', flexDirection: 'column', gap: 14,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--relay-ink-3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Filters</div>
+
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--relay-ink-2)' }}>Priority</span>
+        <select
+          className="select-sm"
+          value={filters.priority}
+          onChange={e => onChange({ ...filters, priority: e.target.value as Filters['priority'] })}
+        >
+          <option value="all">All priorities</option>
+          <option value="urgent">Urgent only</option>
+        </select>
+      </label>
+
+      {providers.length > 1 && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--relay-ink-2)' }}>Provider</span>
+          <select
+            className="select-sm"
+            value={filters.provider}
+            onChange={e => onChange({ ...filters, provider: e.target.value })}
+          >
+            <option value="all">All providers</option>
+            {providers.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </label>
+      )}
+
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--relay-ink-2)' }}>Sort by</span>
+        <select
+          className="select-sm"
+          value={filters.sort}
+          onChange={e => onChange({ ...filters, sort: e.target.value as Filters['sort'] })}
+        >
+          <option value="captured_asc">Oldest captured first</option>
+          <option value="captured_desc">Newest captured first</option>
+          <option value="priority">Urgent first</option>
+        </select>
+      </label>
+
+      <button
+        className="btn btn-sm"
+        style={{ marginTop: 2 }}
+        onClick={() => onChange(DEFAULT_FILTERS)}
+      >
+        Reset filters
+      </button>
+    </div>
+  );
+}
+
+// ── Confirm card ──────────────────────────────────────────────────────────────
 
 function ConfirmCard({ item, onConfirm, onReject }: {
   item: ConfirmQueueItem;
@@ -91,8 +186,6 @@ function ConfirmCard({ item, onConfirm, onReject }: {
         </button>
       </div>
 
-      <div style={{ fontSize: 10.5, color: 'var(--relay-ink-4)', marginTop: 6 }}>(prototype — does not write to real practice system)</div>
-
       {showTranscript && (
         <div style={{ marginTop: 14 }}>
           <TranscriptPanel
@@ -110,8 +203,12 @@ function ConfirmCard({ item, onConfirm, onReject }: {
   );
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function ActionPage() {
   const [items, setItems] = useState<ConfirmQueueItem[]>([]);
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     getConfirmQueue().then(setItems);
@@ -127,16 +224,50 @@ export default function ActionPage() {
     setItems(prev => prev.filter(i => i.referralId !== referralId));
   }
 
+  const providers = [...new Set(items.map(i => i.slot.provider).filter(Boolean))].sort();
+
+  const isFiltered = filters.priority !== 'all' || filters.provider !== 'all' || filters.sort !== 'captured_asc';
+
+  const visible = items
+    .filter(i => filters.priority === 'all' || i.priority === 'urgent')
+    .filter(i => filters.provider === 'all' || i.slot.provider === filters.provider)
+    .sort((a, b) => {
+      if (filters.sort === 'priority') {
+        if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
+        if (b.priority === 'urgent' && a.priority !== 'urgent') return 1;
+      }
+      const aMin = a.capturedAgoMin ?? 0;
+      const bMin = b.capturedAgoMin ?? 0;
+      return filters.sort === 'captured_desc' ? aMin - bMin : bMin - aMin;
+    });
+
   return (
     <>
       <PageHead
         title="Confirm captured slots"
         sub="The AI captured these slots on calls. Commit them in your practice system, then mark confirmed."
       >
-        <span className="tag" style={{ background: 'var(--relay-accent-50)', borderColor: 'var(--relay-accent-200)', color: 'var(--relay-accent-800)' }}>
-          <Icon name="info" size={11} /> Connector mode · MVP
-        </span>
-        <button className="btn btn-sm"><Icon name="filter" size={12} /> Filters</button>
+        <div style={{ position: 'relative' }}>
+          <button
+            className={`btn btn-sm${isFiltered ? ' btn-primary' : ''}`}
+            onClick={() => setFiltersOpen(o => !o)}
+          >
+            <Icon name="filter" size={12} /> Filters
+            {isFiltered && (
+              <span style={{ background: 'white', color: 'var(--relay-accent)', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '1px 5px', marginLeft: 2 }}>
+                {[filters.priority !== 'all', filters.provider !== 'all', filters.sort !== 'captured_asc'].filter(Boolean).length}
+              </span>
+            )}
+          </button>
+          {filtersOpen && (
+            <FilterPanel
+              filters={filters}
+              providers={providers}
+              onChange={setFilters}
+              onClose={() => setFiltersOpen(false)}
+            />
+          )}
+        </div>
       </PageHead>
 
       <div className="alerts-strip calm" style={{ marginBottom: 16 }}>
@@ -152,6 +283,12 @@ export default function ActionPage() {
         </div>
       </div>
 
+      {isFiltered && visible.length !== items.length && (
+        <div style={{ fontSize: 12.5, color: 'var(--relay-ink-3)', marginBottom: 10 }}>
+          Showing {visible.length} of {items.length} · <button className="btn-link" onClick={() => setFilters(DEFAULT_FILTERS)}>Clear filters</button>
+        </div>
+      )}
+
       <div className="stack" style={{ gap: 14 }}>
         {items.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--relay-ink-3)' }}>
@@ -160,7 +297,14 @@ export default function ActionPage() {
             <div style={{ fontSize: 13, marginTop: 4 }}>The AI will route confirmations here as patients accept slots.</div>
           </div>
         )}
-        {items.map(item => (
+        {items.length > 0 && visible.length === 0 && (
+          <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--relay-ink-3)' }}>
+            <Icon name="filter" size={20} />
+            <div style={{ marginTop: 10, fontWeight: 600, fontSize: 14 }}>No items match these filters</div>
+            <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setFilters(DEFAULT_FILTERS)}>Clear filters</button>
+          </div>
+        )}
+        {visible.map(item => (
           <ConfirmCard
             key={item.referralId}
             item={item}

@@ -55,7 +55,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1039',
-    patient: { name: 'Robert Klein', age: 72, sex: 'M', dateOfBirth: '01/08/1954', phone: '+13604815266', language: 'English', insurance: 'Medicare' },
+    patient: { name: 'Robert Klein', age: 72, sex: 'M', dateOfBirth: '01/08/1954', phone: '+19197577586', language: 'English', insurance: 'Medicare' },
     reason: 'Post-MI follow-up',
     referringProvider: 'SF General — discharge',
     referralSource: 'SF General — discharge',
@@ -83,7 +83,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1063',
-    patient: { name: 'Patricia Walsh', age: 68, sex: 'F', dateOfBirth: '05/03/1958', phone: '+14155550192', language: 'English', insurance: 'Medicare Advantage' },
+    patient: { name: 'Patricia Walsh', age: 68, sex: 'F', dateOfBirth: '05/03/1958', phone: '+19197577586', language: 'English', insurance: 'Medicare Advantage' },
     reason: 'Atrial flutter — EP referral',
     referringProvider: 'Dr. Park',
     referralSource: 'Bay Cardiology — internal',
@@ -112,7 +112,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1064',
-    patient: { name: 'James Tan', age: 55, sex: 'M', dateOfBirth: '08/14/1971', phone: '+14155550374', language: 'English', insurance: 'Aetna' },
+    patient: { name: 'James Tan', age: 55, sex: 'M', dateOfBirth: '08/14/1971', phone: '+19197577586', language: 'English', insurance: 'Aetna' },
     reason: 'Dyslipidemia — statin management follow-up',
     referringProvider: 'Dr. Osei (PCP)',
     referralSource: 'EHR feed',
@@ -159,7 +159,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1047',
-    patient: { name: 'Walter Briggs', age: 64, sex: 'M', dateOfBirth: '09/03/1962', phone: '+13604815266', language: 'English', insurance: 'Aetna' },
+    patient: { name: 'Walter Briggs', age: 64, sex: 'M', dateOfBirth: '09/03/1962', phone: '+19197577586', language: 'English', insurance: 'Aetna' },
     reason: 'Chest pain, urgent eval',
     referringProvider: 'Dr. Chen',
     referralSource: 'Bay Cardiology — internal',
@@ -215,7 +215,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1058',
-    patient: { name: 'Grace Mwangi', age: 45, sex: 'F', dateOfBirth: '02/28/1981', phone: '+13604815266', language: 'English', insurance: 'United PPO' },
+    patient: { name: 'Grace Mwangi', age: 45, sex: 'F', dateOfBirth: '02/28/1981', phone: '+19197577586', language: 'English', insurance: 'United PPO' },
     reason: 'Hypertension referral',
     referringProvider: 'Dr. Alvarez (PCP)',
     referralSource: 'Fax — Alvarez Family Medicine',
@@ -243,7 +243,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1061',
-    patient: { name: 'Helen Park', age: 69, sex: 'F', dateOfBirth: '06/30/1957', phone: '+13604815266', language: 'Korean', insurance: 'Medicare Advantage' },
+    patient: { name: 'Helen Park', age: 69, sex: 'F', dateOfBirth: '06/30/1957', phone: '+19197577586', language: 'Korean', insurance: 'Medicare Advantage' },
     reason: 'Heart failure follow-up',
     referringProvider: 'SF General — discharge',
     referralSource: 'SF General — discharge',
@@ -272,7 +272,7 @@ export const referrals: Referral[] = [
   // Additional booked appointments for calendar coverage across multiple weeks
   {
     id: 'REF-1086',
-    patient: { name: 'Helena Brandt', age: 62, sex: 'F', dateOfBirth: '03/15/1964', phone: '+14155550291', language: 'English', insurance: 'Medicare' },
+    patient: { name: 'Helena Brandt', age: 62, sex: 'F', dateOfBirth: '03/15/1964', phone: '+19197577586', language: 'English', insurance: 'Medicare' },
     reason: 'Pre-op cardiac clearance',
     referringProvider: 'Ortho — Dr. Nguyen',
     referralSource: 'Referral platform',
@@ -287,7 +287,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1087',
-    patient: { name: 'Linh Pham', age: 55, sex: 'F', dateOfBirth: '08/20/1970', phone: '+14155550382', language: 'Vietnamese', insurance: 'Medicare Advantage' },
+    patient: { name: 'Linh Pham', age: 55, sex: 'F', dateOfBirth: '08/20/1970', phone: '+19197577586', language: 'Vietnamese', insurance: 'Medicare Advantage' },
     reason: 'CHF management follow-up',
     referringProvider: 'SF General — discharge',
     referralSource: 'SF General — discharge',
@@ -302,7 +302,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1088',
-    patient: { name: 'Aisha Patel', age: 48, sex: 'F', dateOfBirth: '06/05/1978', phone: '+14155550417', language: 'English', insurance: 'Blue Shield PPO' },
+    patient: { name: 'Aisha Patel', age: 48, sex: 'F', dateOfBirth: '06/05/1978', phone: '+19197577586', language: 'English', insurance: 'Blue Shield PPO' },
     reason: 'HTN consult',
     referringProvider: 'Dr. Osei (PCP)',
     referralSource: 'EHR feed',
@@ -317,7 +317,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1089',
-    patient: { name: 'Beatriz Coelho', age: 71, sex: 'F', dateOfBirth: '11/30/1955', phone: '+14155550529', language: 'Portuguese', insurance: 'Medicare' },
+    patient: { name: 'Beatriz Coelho', age: 71, sex: 'F', dateOfBirth: '11/30/1955', phone: '+19197577586', language: 'Portuguese', insurance: 'Medicare' },
     reason: 'Palpitations evaluation',
     referringProvider: 'Dr. Alvarez (PCP)',
     referralSource: 'Fax — Alvarez Family Medicine',
@@ -332,7 +332,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1090',
-    patient: { name: 'Sofia Reyes', age: 65, sex: 'F', dateOfBirth: '04/22/1961', phone: '+14155550634', language: 'Spanish', insurance: 'Medicare' },
+    patient: { name: 'Sofia Reyes', age: 65, sex: 'F', dateOfBirth: '04/22/1961', phone: '+19197577586', language: 'Spanish', insurance: 'Medicare' },
     reason: 'Annual cardiac screening',
     referringProvider: 'Dr. Chen',
     referralSource: 'Bay Cardiology — internal',
@@ -347,7 +347,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1091',
-    patient: { name: 'Marcus Bell', age: 58, sex: 'M', dateOfBirth: '01/07/1968', phone: '+14155550748', language: 'English', insurance: 'Cigna' },
+    patient: { name: 'Marcus Bell', age: 58, sex: 'M', dateOfBirth: '01/07/1968', phone: '+19197577586', language: 'English', insurance: 'Cigna' },
     reason: 'Heart failure management',
     referringProvider: 'SF General — discharge',
     referralSource: 'SF General — discharge',
@@ -362,7 +362,7 @@ export const referrals: Referral[] = [
   },
   {
     id: 'REF-1092',
-    patient: { name: 'David Kim', age: 52, sex: 'M', dateOfBirth: '09/14/1973', phone: '+14155550851', language: 'Korean', insurance: 'United PPO' },
+    patient: { name: 'David Kim', age: 52, sex: 'M', dateOfBirth: '09/14/1973', phone: '+19197577586', language: 'Korean', insurance: 'United PPO' },
     reason: 'Arrhythmia evaluation',
     referringProvider: 'Dr. Alvarez (PCP)',
     referralSource: 'EHR feed',
@@ -378,7 +378,7 @@ export const referrals: Referral[] = [
   // Outreach referrals (fill to keep pipeline counts realistic)
   ...(['Linda Brown','Omar Farah','Nina Petrov','Carl Jensen','Aisha Bello','Tom Whitaker','Sara Kim','Luis Mendez','Ruth Cohen','Ben Adler'] as const).map((name, i): Referral => ({
     id: `REF-10${70 + i}`,
-    patient: { name, age: 50 + (i % 30), sex: i % 2 === 0 ? 'F' : 'M', dateOfBirth: ['05/14/1976','12/02/1975','03/07/1974','10/17/1973','06/22/1972','01/08/1971','08/30/1970','04/04/1969','09/15/1968','02/27/1967'][i], phone: i % 2 === 0 ? '+13604815266' : '+19197577586', language: ['English','Spanish','English','English','English','Mandarin','English','English','English','English'][i], insurance: ['Medicare','Aetna','Blue Shield PPO','United PPO','Kaiser','Cigna','Medicare Advantage','Medicare','Aetna','Blue Shield PPO'][i] },
+    patient: { name, age: 50 + (i % 30), sex: i % 2 === 0 ? 'F' : 'M', dateOfBirth: ['05/14/1976','12/02/1975','03/07/1974','10/17/1973','06/22/1972','01/08/1971','08/30/1970','04/04/1969','09/15/1968','02/27/1967'][i], phone: '+19197577586', language: ['English','Spanish','English','English','English','Mandarin','English','English','English','English'][i], insurance: ['Medicare','Aetna','Blue Shield PPO','United PPO','Kaiser','Cigna','Medicare Advantage','Medicare','Aetna','Blue Shield PPO'][i] },
     reason: ['Arrhythmia eval','Syncope workup','Valve follow-up','Chest pain eval','Lipid management','Pacemaker check','Cardiomyopathy f/u','Hypertension referral','Palpitations','Stress test'][i],
     referringProvider: ['Dr. Chen','Dr. Alvarez (PCP)','Dr. Osei (PCP)','SF General — discharge','Dr. Chen','Dr. Alvarez (PCP)','Dr. Osei (PCP)','SF General — discharge','Dr. Chen','Dr. Alvarez (PCP)'][i],
     referralSource: 'EHR feed',

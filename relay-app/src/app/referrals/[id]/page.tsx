@@ -10,6 +10,7 @@ import {
   updateReferral,
   createCapturedSlot,
   patchLatestTranscript,
+  getBookedSlotKeys,
 } from "@/lib/data";
 import { useActiveCall } from "@/contexts/ActiveCallContext";
 import { StatePill } from "@/components/shared/StatePill";
@@ -109,8 +110,8 @@ function outcomeLabel(result: ElevenLabsCallResult): Attempt["outcome"] {
 
 // Maps each call outcome to the resulting referral state per REFERRAL_STATUSES.md
 const OUTCOME_TO_STATE: Record<string, ReferralState> = {
-  "No Answer": "In Progress",
-  "Voicemail Left": "In Progress",
+  "No Answer": "Attempted",
+  "Voicemail Left": "Attempted",
   "Call Back Requested": "In Progress",
   "Identity Verified": "In Progress",
   Interested: "In Progress",
@@ -227,7 +228,11 @@ function normalizeSlotDay(raw: string): string {
 
 // Returns n upcoming weekday slots with pre-formatted spoken labels so the agent
 // mirrors the exact format ("Tuesday, June 11th at 4:00 PM") when reading them aloud.
-function buildUpcomingSlots(n: number) {
+const ALL_SLOT_TIMES = ["9:00 AM", "10:30 AM", "2:00 PM", "4:00 PM"];
+const MONTH_S_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DAY_S_SHORT   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+function buildUpcomingSlots(n: number, bookedKeys: Set<string> = new Set()) {
   const slots: { spoken_date: string; weekday: string; date: string; times: string[]; spoken_options: string[] }[] = [];
   const cursor = new Date();
   cursor.setDate(cursor.getDate() + 1);
@@ -243,14 +248,17 @@ function buildUpcomingSlots(n: number) {
         : day === 2 || day === 22 ? "nd"
         : day === 3 || day === 23 ? "rd" : "th";
       const spoken_date = `${weekday}, ${monthDay.replace(/\d+/, `${day}${suffix}`)}`;
-      const times = ["9:00 AM", "10:30 AM", "2:00 PM", "4:00 PM"];
-      slots.push({
-        spoken_date,
-        weekday,
-        date: `${monthDay}, ${year}`,
-        times,
-        spoken_options: times.map((t) => `${spoken_date} at ${t}`),
-      });
+      const dayKey = `${DAY_S_SHORT[cursor.getDay()]} ${MONTH_S_SHORT[cursor.getMonth()]} ${cursor.getDate()}`;
+      const times = ALL_SLOT_TIMES.filter(t => !bookedKeys.has(`${dayKey}|${t}`));
+      if (times.length > 0) {
+        slots.push({
+          spoken_date,
+          weekday,
+          date: `${monthDay}, ${year}`,
+          times,
+          spoken_options: times.map((t) => `${spoken_date} at ${t}`),
+        });
+      }
     }
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -634,7 +642,8 @@ export default function ReferralDetailPage() {
       const todayDate = new Date().toLocaleDateString("en-US", {
         weekday: "long", year: "numeric", month: "long", day: "numeric",
       });
-      const upcomingSlots = buildUpcomingSlots(6);
+      const bookedKeys = await getBookedSlotKeys();
+      const upcomingSlots = buildUpcomingSlots(6, bookedKeys);
       // Summary uses the pre-formatted spoken style so the agent reads dates the same way
       const available_slots_summary = upcomingSlots
         .map((s) => `${s.spoken_date}: ${s.times.join(", ")}`)
@@ -771,7 +780,11 @@ export default function ReferralDetailPage() {
     const duration = formatDuration(result.metadata?.call_duration_secs);
     const summary = result.analysis?.transcript_summary ?? "AI call · no summary available";
     const outcome = outcomeLabel(result);
-    const newState = OUTCOME_TO_STATE[outcome] ?? "In Progress";
+    const baseState = OUTCOME_TO_STATE[outcome] ?? "In Progress";
+    // Promote "In Progress" → "Attempted" once there are prior call attempts
+    const newState: ReferralState = baseState === "In Progress" && currentReferral.attempts.length > 0
+      ? "Attempted"
+      : baseState;
     const turns = buildTurns(result);
     const dcr = result.analysis?.data_collection_results ?? {};
 
@@ -873,7 +886,10 @@ export default function ReferralDetailPage() {
       month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
     });
     const outcome = outcomeLabel(result);
-    const newState = OUTCOME_TO_STATE[outcome] ?? "In Progress";
+    const baseState = OUTCOME_TO_STATE[outcome] ?? "In Progress";
+    const newState: ReferralState = baseState === "In Progress" && currentReferral.attempts.length > 0
+      ? "Attempted"
+      : baseState;
     const newAttempt: Attempt = {
       n: currentReferral.attempts.length + 1,
       timestamp: now,
@@ -979,98 +995,6 @@ export default function ReferralDetailPage() {
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <h1 style={{ fontSize: 22, margin: 0 }}>{r.patient.name}</h1>
-              {/* Make call button — inline with name */}
-              {callPhase === "idle" && (
-                <button
-                  className="btn btn-primary"
-                  style={{
-                    fontSize: 13,
-                    padding: "5px 14px",
-                    borderRadius: 7,
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                  onClick={startCall}
-                >
-                  <Icon name="phone" size={13} /> Make call
-                </button>
-              )}
-              {callPhase === "calling" && (
-                <button
-                  className="btn"
-                  style={{
-                    fontSize: 13,
-                    padding: "5px 14px",
-                    borderRadius: 7,
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                  disabled
-                >
-                  <Icon name="phone" size={13} /> Calling…
-                </button>
-              )}
-              {callPhase === "polling" && (
-                <button
-                  className="btn"
-                  style={{
-                    fontSize: 13,
-                    padding: "5px 14px",
-                    borderRadius: 7,
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                  disabled
-                >
-                  <Icon name="phone" size={13} /> Call in progress…
-                </button>
-              )}
-              {callPhase === "done" && (
-                <button
-                  className="btn"
-                  style={{
-                    fontSize: 13,
-                    padding: "5px 14px",
-                    borderRadius: 7,
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    background: "var(--st-booked-bg)",
-                    color: "var(--st-booked-fg)",
-                    borderColor: "var(--relay-accent-200)",
-                  }}
-                  disabled
-                >
-                  <Icon name="check" size={13} /> Call complete
-                </button>
-              )}
-              {callPhase === "error" && (
-                <button
-                  className="btn"
-                  style={{
-                    fontSize: 13,
-                    padding: "5px 14px",
-                    borderRadius: 7,
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    background: "#fee2e2",
-                    color: "#b91c1c",
-                    borderColor: "#fecaca",
-                  }}
-                  onClick={startCall}
-                >
-                  <Icon name="alert" size={13} /> Retry call
-                </button>
-              )}
             </div>
             <div
               className="sub"
@@ -1108,29 +1032,6 @@ export default function ReferralDetailPage() {
         </div>
 
         <div className="right">
-          {/* Edit info buttons */}
-          {!editing ? (
-            <button className="btn btn-sm" onClick={enterEdit}>
-              <Icon name="edit" size={12} /> Edit info
-            </button>
-          ) : (
-            <>
-              <button
-                className="btn btn-sm btn-ghost"
-                onClick={() => setEditing(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-sm btn-primary"
-                onClick={saveEdit}
-                disabled={saving}
-              >
-                {saving ? "Saving…" : "Save changes"}
-              </button>
-            </>
-          )}
-
           {/* Make call button */}
           {callPhase === "idle" && (
             <button className="btn btn-sm btn-primary" onClick={startCall}>
@@ -1174,19 +1075,29 @@ export default function ReferralDetailPage() {
             </button>
           )}
 
-          <button className="btn btn-sm">
-            <Icon name="pause" size={12} /> Pause cadence
-          </button>
-          <button
-            className="btn btn-sm"
-            style={{
-              background: "#fee2e2",
-              color: "#b91c1c",
-              borderColor: "#fecaca",
-            }}
-          >
-            <Icon name="flag" size={12} /> Escalate
-          </button>
+          {/* Edit info buttons */}
+          {!editing ? (
+            <button className="btn btn-sm" onClick={enterEdit}>
+              <Icon name="edit" size={12} /> Edit info
+            </button>
+          ) : (
+            <>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={() => setEditing(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={saveEdit}
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+            </>
+          )}
+
           {r.state === "Pending Confirmation" && (
             <Link href="/action">
               <button className="btn btn-sm btn-primary">

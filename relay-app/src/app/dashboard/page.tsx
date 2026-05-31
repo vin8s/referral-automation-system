@@ -13,6 +13,7 @@ import { Funnel } from '@/components/shared/Funnel';
 import { Icon } from '@/components/shared/Icon';
 import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList';
 import { TranscriptPanel } from '@/components/shared/TranscriptPanel';
+import { useCallQueue } from '@/contexts/CallQueueContext';
 import type {
   ConfirmQueueItem, PipelineCount, Referral,
   CallLogEntry, CalendarEvent, UrgentAlert, DashboardFunnelStep,
@@ -479,6 +480,7 @@ function PipelineFunnelCard({ steps }: { steps: DashboardFunnelStep[] }) {
 
 // ── Dashboard page ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
+  const { openQueue } = useCallQueue();
   const [queue, setQueue]                   = useState<ConfirmQueueItem[]>([]);
   const [pipeline, setPipeline]             = useState<PipelineCount[]>([]);
   const [referrals, setReferrals]           = useState<Referral[]>([]);
@@ -522,9 +524,8 @@ export default function DashboardPage() {
         title="Good morning, Priya"
         sub={`Today is Apr 14 · ${inMotion || '—'} referrals in motion`}
       >
-        <EscalationPopover alerts={alerts} />
-        <button className="btn btn-sm btn-ghost" onClick={fetchAll}>
-          <Icon name="refresh" size={13} />
+        <button className="btn btn-sm btn-primary" onClick={openQueue}>
+          <Icon name="phone" size={12} /> Run Queue
         </button>
       </PageHead>
 

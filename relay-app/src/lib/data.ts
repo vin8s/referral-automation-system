@@ -18,7 +18,7 @@ import type {
   Referral, ReferralState, Attempt, ConfirmQueueItem, UrgentAlert,
   CallLogEntry, CalendarEvent, PipelineCount, Analytics,
   Org, CurrentUser, DashboardFunnelStep, DashboardHealthSignals,
-  Priority, ReferralLogEntry, Channel, CallOutcome,
+  Priority, ReferralLogEntry, Channel, CallOutcome, PracticeSettings,
 } from './types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -99,7 +99,9 @@ function mapReferral(row: any): Referral {
     referralTime: fmtDate(row.referral_time),
     location: row.location ?? '',
     priority: row.priority as Priority,
-    state: row.state as ReferralState,
+    state: (row.state === 'In Progress' && attempts.length > 0
+      ? 'Attempted'
+      : row.state) as ReferralState,
     capturedSlot: capturedAppt ? {
       day: capturedAppt.day,
       time: capturedAppt.time,
@@ -146,10 +148,30 @@ export async function getCurrentUser(): Promise<CurrentUser> {
   return _currentUser;
 }
 
+// ── Booked slot keys ──────────────────────────────────────────────────────────
+// Returns a Set of "DDD Mon D|H:MM AM" keys for all captured + confirmed slots.
+// Used by callUtils to filter already-booked times out of the available_slots list.
+export async function getBookedSlotKeys(): Promise<Set<string>> {
+  const referrals = await getReferrals();
+  const keys = new Set<string>();
+  for (const r of referrals) {
+    for (const slot of [r.capturedSlot, r.bookedAppointment].filter(Boolean) as { day: string; time: string }[]) {
+      if (slot.day && slot.time) {
+        keys.add(`${slot.day.trim()}|${slot.time.trim().toUpperCase()}`);
+      }
+    }
+  }
+  return keys;
+}
+
 // ── Referrals ─────────────────────────────────────────────────────────────────
 
 export async function getReferrals(): Promise<Referral[]> {
-  if (USE_MOCK) return _referrals;
+  if (USE_MOCK) return _referrals.map(r =>
+    r.state === 'In Progress' && r.attempts.length > 0
+      ? { ...r, state: 'Attempted' as ReferralState }
+      : r
+  );
   const { data, error } = await supabase
     .from('referrals')
     .select(REFERRAL_SELECT)
@@ -159,7 +181,12 @@ export async function getReferrals(): Promise<Referral[]> {
 }
 
 export async function getReferralById(id: string): Promise<Referral | null> {
-  if (USE_MOCK) return _referrals.find(r => r.id === id) ?? null;
+  if (USE_MOCK) {
+    const r = _referrals.find(r => r.id === id) ?? null;
+    if (r && r.state === 'In Progress' && r.attempts.length > 0)
+      return { ...r, state: 'Attempted' as ReferralState };
+    return r;
+  }
   const { data, error } = await supabase
     .from('referrals')
     .select(REFERRAL_SELECT)
@@ -473,7 +500,7 @@ export async function getCalendarEvents(): Promise<CalendarEvent[]> {
 // ── Pipeline / analytics ──────────────────────────────────────────────────────
 
 export async function getPipeline(): Promise<PipelineCount[]> {
-  const states: ReferralState[] = ['Queued', 'In Progress', 'Pending Confirmation', 'Booked', 'Escalated'];
+  const states: ReferralState[] = ['Queued', 'In Progress', 'Attempted', 'Pending Confirmation', 'Booked', 'Escalated'];
   if (USE_MOCK) {
     return states.map(s => ({ state: s, count: _referrals.filter(r => r.state === s).length }));
   }
@@ -495,7 +522,55 @@ export async function getDashboardCallActivity() {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-export async function getSettings() {
+const SETTINGS_KEY = 'relay_practice_settings';
+
+const VALID_CALL_ORDERS = ['chronological', 'urgent_first', 'most_recent', 'fewest_attempts'] as const;
+
+const _defaultSettings: PracticeSettings = {
+  cadence: { intervalMinutes: 5, maxCallsPerSession: 10, callOrder: 'chronological' },
+};
+
+function loadPersistedSettings(): PracticeSettings {
+  if (typeof window === 'undefined') return _defaultSettings;
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return _defaultSettings;
+    const parsed = JSON.parse(raw) as Record<string, unknown> & { cadence?: Record<string, unknown> };
+    // Migrate legacy urgentFirst boolean → callOrder string
+    const savedOrder = parsed.cadence?.callOrder as string | undefined;
+    const legacyUrgentFirst = parsed.cadence?.urgentFirst;
+    const callOrder = VALID_CALL_ORDERS.includes(savedOrder as typeof VALID_CALL_ORDERS[number])
+      ? (savedOrder as typeof VALID_CALL_ORDERS[number])
+      : legacyUrgentFirst === true
+      ? 'urgent_first'
+      : _defaultSettings.cadence.callOrder;
+    return {
+      cadence: {
+        intervalMinutes: (parsed.cadence?.intervalMinutes as number) ?? _defaultSettings.cadence.intervalMinutes,
+        maxCallsPerSession: (parsed.cadence?.maxCallsPerSession as number) ?? _defaultSettings.cadence.maxCallsPerSession,
+        callOrder,
+      },
+    };
+  } catch {
+    return _defaultSettings;
+  }
+}
+
+export async function getSettings(): Promise<PracticeSettings> {
+  if (USE_MOCK) return loadPersistedSettings();
+  // Phase 2: SELECT from practice_settings WHERE id = 'default'
+  return loadPersistedSettings();
+}
+
+export async function saveSettings(s: PracticeSettings): Promise<void> {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  }
+  if (USE_MOCK) return;
+  // Phase 2: UPSERT into practice_settings
+}
+
+export async function getRawSettings() {
   return _settings;
 }
 
@@ -801,11 +876,11 @@ export async function getReferralLog(): Promise<ReferralLogEntry[]> {
   const [attemptsRes, auditRes] = await Promise.all([
     supabase
       .from('call_attempts')
-      .select('*, referrals(id, patients(name))')
+      .select('*, referrals(id, state, patients(name))')
       .order('attempted_at', { ascending: false }),
     supabase
       .from('audit_log')
-      .select('*, referrals(id, patients(name))')
+      .select('*, referrals(id, state, patients(name))')
       .order('created_at', { ascending: false }),
   ]);
 
@@ -821,6 +896,9 @@ export async function getReferralLog(): Promise<ReferralLogEntry[]> {
   const entries: ReferralLogEntry[] = [];
 
   for (const a of allAttempts) {
+    const rawState = (a as any).referrals?.state as ReferralState | undefined;
+    // ai_call entries have at least one attempt — apply the same Attempted derivation
+    const referralState: ReferralState = rawState === 'In Progress' ? 'Attempted' : (rawState ?? 'Queued');
     entries.push({
       referralId: a.referral_id,
       patient: (a as any).referrals?.patients?.name ?? '—',
@@ -828,6 +906,7 @@ export async function getReferralLog(): Promise<ReferralLogEntry[]> {
       type: 'ai_call',
       who: 'AI agent',
       what: `${a.channel === 'voice' ? 'Voice' : 'SMS'} · ${a.outcome}`,
+      referralState,
       detail: a.summary ?? undefined,
       channel: a.channel as Channel,
       outcome: a.outcome,
@@ -840,6 +919,7 @@ export async function getReferralLog(): Promise<ReferralLogEntry[]> {
   }
 
   for (const e of auditRes.data ?? []) {
+    const rawState = (e as any).referrals?.state as ReferralState | undefined;
     entries.push({
       referralId: e.referral_id,
       patient: (e as any).referrals?.patients?.name ?? '—',
@@ -847,6 +927,7 @@ export async function getReferralLog(): Promise<ReferralLogEntry[]> {
       type: e.what.startsWith('State') ? 'system' : 'manual_update',
       who: e.user_id ? 'Staff' : 'System',
       what: e.what,
+      referralState: rawState,
     });
   }
 

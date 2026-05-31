@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
+import { getSettings, saveSettings } from '@/lib/data';
+import type { CadenceConfig, CallOrderMode } from '@/lib/types';
 
 const SECTIONS = [
   { id: 'cadence',    label: 'Cadence policy',          icon: 'history' },
@@ -34,7 +36,50 @@ function SettingRow({ label, sub, control }: { label: string; sub?: string; cont
   );
 }
 
+const INTERVAL_OPTIONS = [1/6, 0.5, 1, 2, 5, 10, 15, 30, 60];
+
+function fmtInterval(mins: number): string {
+  if (mins < 1) return `${Math.round(mins * 60)} sec`;
+  return `${mins} min`;
+}
+
+const CALL_ORDER_OPTIONS: { value: CallOrderMode; label: string; sub: string; icon: string }[] = [
+  { value: 'chronological',   label: 'Chronological',    sub: 'Patients referred first are called first (FIFO)',          icon: 'history'     },
+  { value: 'urgent_first',    label: 'Urgent first',     sub: 'Urgent-priority patients called before standard',          icon: 'alert'       },
+  { value: 'most_recent',     label: 'Most recent',      sub: 'Newest referrals are called first',                        icon: 'cal'         },
+  { value: 'fewest_attempts', label: 'Fewest attempts',  sub: 'Patients with least prior outreach are called first',      icon: 'phone'       },
+];
+
 function CadenceSettings() {
+  const [cadence, setCadence] = useState<CadenceConfig>({ intervalMinutes: 5, maxCallsPerSession: 10, callOrder: 'chronological' });
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getSettings().then(s => setCadence(s.cadence));
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    await saveSettings({ cadence });
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  const inputStyle = {
+    background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
+    borderRadius: 6, padding: '5px 9px', font: 'inherit', fontSize: 13,
+    color: 'var(--relay-ink)', outline: 'none',
+  };
+  const toggleStyle = (on: boolean): React.CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '5px 12px', borderRadius: 99, cursor: 'pointer',
+    fontSize: 12.5, fontWeight: 500, border: 'none', fontFamily: 'inherit',
+    background: on ? 'var(--relay-accent)' : 'var(--relay-tint)',
+    color: on ? '#fff' : 'var(--relay-ink-3)',
+  });
+
   return (
     <>
       <div className="card">
@@ -48,11 +93,115 @@ function CadenceSettings() {
         <SettingRow label="Voice attempt #3" control={<FakeInput value="Day +5" />} />
         <SettingRow label="Stop rule" sub="Cadence ends; referral remains available for re-engagement" control={<FakeInput value="5 attempts" w={110} />} />
       </div>
+
       <div className="card">
         <div className="card-head"><h3>Urgent / high-priority overrides</h3></div>
         <SettingRow label="First attempt SLA" sub="From ingest" control={<FakeInput value="≤ 30 min" />} />
         <SettingRow label="Stop rule" control={<FakeInput value="7 attempts" w={110} />} />
         <SettingRow label="Hand to human if no answer in" control={<FakeInput value="3 attempts" w={110} />} />
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3 style={{ margin: 0 }}>Queue session</h3>
+            <p className="card-sub" style={{ marginTop: 2 }}>
+              Controls how the auto-call queue runs — interval between consecutive calls, session size, and call order.
+            </p>
+          </div>
+        </div>
+
+        <SettingRow
+          label="Interval between calls"
+          sub="Wait time after each call before dialing the next patient"
+          control={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <select
+                value={cadence.intervalMinutes}
+                onChange={e => setCadence(c => ({ ...c, intervalMinutes: Number(e.target.value) }))}
+                style={{ ...inputStyle, width: 80 }}
+              >
+                {INTERVAL_OPTIONS.map(v => (
+                  <option key={v} value={v}>{fmtInterval(v)}</option>
+                ))}
+              </select>
+            </div>
+          }
+        />
+
+        <SettingRow
+          label="Max calls per session"
+          sub="Hard cap on patients called in a single queue run"
+          control={
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={cadence.maxCallsPerSession}
+              onChange={e => setCadence(c => ({ ...c, maxCallsPerSession: Math.min(50, Math.max(1, Number(e.target.value))) }))}
+              style={{ ...inputStyle, width: 70 }}
+            />
+          }
+        />
+
+        <div style={{ padding: '14px 0', borderBottom: '1px solid var(--relay-hairline)' }}>
+          <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 2 }}>Call order</div>
+          <div style={{ fontSize: 12, color: 'var(--relay-ink-3)', marginBottom: 10 }}>
+            Determines the sequence patients are dialed in each queue session
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {CALL_ORDER_OPTIONS.map(opt => {
+              const on = cadence.callOrder === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => setCadence(c => ({ ...c, callOrder: opt.value }))}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    background: on ? 'var(--relay-accent-50)' : 'var(--relay-tint)',
+                    border: `1.5px solid ${on ? 'var(--relay-accent)' : 'var(--relay-hairline)'}`,
+                    textAlign: 'left', fontFamily: 'inherit',
+                    transition: 'border-color 0.12s, background 0.12s',
+                  }}
+                >
+                  <div style={{
+                    width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+                    background: on ? 'var(--relay-accent)' : 'var(--relay-surface)',
+                    border: `1px solid ${on ? 'var(--relay-accent)' : 'var(--relay-hairline)'}`,
+                    display: 'grid', placeItems: 'center',
+                    color: on ? '#fff' : 'var(--relay-ink-3)',
+                  }}>
+                    <Icon name={opt.icon} size={12} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: on ? 'var(--relay-accent)' : 'var(--relay-ink)', lineHeight: 1.2 }}>
+                      {opt.label}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)', marginTop: 2, lineHeight: 1.35 }}>
+                      {opt.sub}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          {saved && (
+            <span style={{ fontSize: 12.5, color: 'var(--relay-accent)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Icon name="check" size={13} /> Saved
+            </span>
+          )}
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : 'Save cadence settings'}
+          </button>
+        </div>
       </div>
     </>
   );
@@ -195,9 +344,8 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHead title="Settings" sub="The supervised-automation story made tangible.">
+      <PageHead title="Settings" sub="Configure your AI voice cadence and practice preferences.">
         <button className="btn btn-sm">Audit log</button>
-        <button className="btn btn-sm btn-primary">Save</button>
       </PageHead>
 
       <div className="row" style={{ alignItems: 'flex-start' }}>

@@ -42,7 +42,8 @@
   --st-ingested-bg: #f1f5f9;   --st-ingested-fg: #475569;
   --st-queued-bg: #eff6ff;     --st-queued-fg: #1d4ed8;
   --st-outreach-bg: #ecfeff;   --st-outreach-fg: #0e7490;
-  --st-accepted-bg: #fef3c7;   --st-accepted-fg: #92400e;
+  --st-accepted-bg: #f5f3ff;   --st-accepted-fg: #6d28d9;
+  --st-attempted-bg: #fff7ed;  --st-attempted-fg: #ea580c;
   --st-booked-bg: #ccfbf1;     --st-booked-fg: #0f766e;
   --st-escalated-bg: #fee2e2;  --st-escalated-fg: #b91c1c;
   --st-lost-bg: #f1f5f9;       --st-lost-fg: #334155;
@@ -361,6 +362,10 @@
   .btn-ghost:hover { background: var(--relay-tint); border-color: var(--relay-hairline); }
   .btn-danger { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
   .btn-danger:hover { background: #fecaca; }
+  .btn-link { background: none; border: none; padding: 0; color: var(--relay-accent); font-size: inherit; cursor: pointer; text-decoration: underline; }
+  .btn-link:hover { opacity: .8; }
+  .select-sm { font-size: 12.5px; padding: 5px 8px; border: 1px solid var(--relay-hairline); border-radius: var(--relay-radius-sm, 6px); background: var(--relay-surface); color: var(--relay-ink); outline: none; width: 100%; }
+  .select-sm:focus { border-color: var(--relay-accent); }
 
   /* Metric card */
   .metric { padding: 16px 18px; }

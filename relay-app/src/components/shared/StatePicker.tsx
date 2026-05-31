@@ -7,7 +7,7 @@ import { updateReferralState } from '@/lib/data';
 import type { ReferralState } from '@/lib/types';
 
 const ALL_STATES: ReferralState[] = [
-  'Queued', 'In Progress', 'Pending Confirmation', 'Booked', 'Escalated',
+  'Queued', 'In Progress', 'Attempted', 'Pending Confirmation', 'Booked', 'Escalated',
 ];
 
 interface StatePickerProps {

@@ -8,7 +8,8 @@ import type { ReferralState } from '@/lib/types';
 const STATE_MAP: Record<string, { bg: string; fg: string; dot: string; label: string }> = {
   'Queued':               { bg: 'var(--st-queued-bg)',    fg: 'var(--st-queued-fg)',    dot: '#3b82f6', label: 'Queued' },
   'In Progress':          { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',  dot: '#0891b2', label: 'In Progress' },
-  'Pending Confirmation': { bg: 'var(--st-accepted-bg)',  fg: 'var(--st-accepted-fg)',  dot: '#d97706', label: 'Pending Confirmation' },
+  'Attempted':            { bg: 'var(--st-attempted-bg)', fg: 'var(--st-attempted-fg)', dot: '#ea580c', label: 'Attempted' },
+  'Pending Confirmation': { bg: 'var(--st-accepted-bg)',  fg: 'var(--st-accepted-fg)',  dot: '#6d28d9', label: 'Pending Confirmation' },
   'Booked':               { bg: 'var(--st-booked-bg)',    fg: 'var(--st-booked-fg)',    dot: '#0d9488', label: 'Booked' },
   'Escalated':            { bg: 'var(--st-escalated-bg)', fg: 'var(--st-escalated-fg)', dot: '#dc2626', label: 'Escalated' },
 

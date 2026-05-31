@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
-import { getCalendarEvents, getSettings } from '@/lib/data';
+import { getCalendarEvents } from '@/lib/data';
 import type { CalendarEvent } from '@/lib/types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -262,10 +262,10 @@ export default function CalendarPage() {
   })();
 
   useEffect(() => {
-    getCalendarEvents().then(setEvents);
-    getSettings().then(s => {
-      setProviders(s.practiceProfile.providers);
-      setLocations(s.practiceProfile.locations);
+    getCalendarEvents().then(evts => {
+      setEvents(evts);
+      setProviders([...new Set(evts.map(e => e.provider).filter(Boolean))]);
+      setLocations([...new Set(evts.map(e => e.location).filter(Boolean))]);
     });
   }, []);
 
@@ -354,7 +354,7 @@ export default function CalendarPage() {
     <>
       <PageHead
         title="Calendar"
-        sub="Confirmed bookings · shadow mirror entries shown dashed (read-only · MVP)"
+        sub="Confirmed bookings"
       >
         <div className="variations">
           <button

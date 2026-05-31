@@ -4,6 +4,7 @@
 export type ReferralState =
   | 'Queued'
   | 'In Progress'
+  | 'Attempted'
   | 'Pending Confirmation'
   | 'Booked'
   | 'Escalated';
@@ -242,6 +243,7 @@ export interface ReferralLogEntry {
   type: 'ai_call' | 'manual_update' | 'system';
   who: string;
   what: string;
+  referralState?: ReferralState;
   detail?: string;
   channel?: Channel;
   outcome?: string;
@@ -250,6 +252,22 @@ export interface ReferralLogEntry {
   escalated?: boolean;
   hasTranscript?: boolean;
   attempt?: number;
+}
+
+export type CallOrderMode =
+  | 'chronological'    // oldest referral first (FIFO)
+  | 'urgent_first'     // urgent priority first, then chronological
+  | 'most_recent'      // newest referral first
+  | 'fewest_attempts'; // least-attempted patients first
+
+export interface CadenceConfig {
+  intervalMinutes: number;
+  maxCallsPerSession: number;
+  callOrder: CallOrderMode;
+}
+
+export interface PracticeSettings {
+  cadence: CadenceConfig;
 }
 
 export interface ElevenLabsCallResult {
