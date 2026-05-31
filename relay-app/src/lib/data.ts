@@ -148,6 +148,16 @@ export async function getCurrentUser(): Promise<CurrentUser> {
   return _currentUser;
 }
 
+// ── Time normalizer ───────────────────────────────────────────────────────────
+// Converts "2 PM" → "2:00 PM", "9 AM" → "9:00 AM", "09:00 AM" → "9:00 AM".
+// Single source of truth so booked-key format always matches ALL_SLOT_TIMES.
+export function normalizeTime(t: string): string {
+  const m = t.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (!m) return t.trim().toUpperCase();
+  const h = parseInt(m[1], 10); // strip leading zero
+  return `${h}:${m[2] ?? '00'} ${m[3].toUpperCase()}`;
+}
+
 // ── Booked slot keys ──────────────────────────────────────────────────────────
 // Returns a Set of "DDD Mon D|H:MM AM" keys for all captured + confirmed slots.
 // Used by callUtils to filter already-booked times out of the available_slots list.
@@ -157,7 +167,9 @@ export async function getBookedSlotKeys(): Promise<Set<string>> {
   for (const r of referrals) {
     for (const slot of [r.capturedSlot, r.bookedAppointment].filter(Boolean) as { day: string; time: string }[]) {
       if (slot.day && slot.time) {
-        keys.add(`${slot.day.trim()}|${slot.time.trim().toUpperCase()}`);
+        // normCalDay converts ISO "2026-06-01" → "Mon Jun 1" to match buildUpcomingSlots key format
+        const normalizedDay = normCalDay(slot.day) ?? slot.day.trim();
+        keys.add(`${normalizedDay}|${normalizeTime(slot.time)}`);
       }
     }
   }
@@ -497,6 +509,63 @@ export async function getCalendarEvents(): Promise<CalendarEvent[]> {
     .filter((e): e is CalendarEvent => e !== null);
 }
 
+export async function updateCalendarEvent(
+  referralId: string,
+  updates: { day?: string; time?: string; provider?: string; location?: string },
+): Promise<{ success: boolean }> {
+  if (USE_MOCK) {
+    const ref = _referrals.find(r => r.id === referralId);
+    if (ref?.bookedAppointment) {
+      if (updates.day) ref.bookedAppointment.day = normCalDay(updates.day) ?? updates.day;
+      if (updates.time) ref.bookedAppointment.time = updates.time;
+      if (updates.provider) ref.bookedAppointment.provider = updates.provider;
+      if (updates.location) ref.location = updates.location;
+    }
+    return { success: true };
+  }
+  const apptUpdates: Record<string, string> = {};
+  if (updates.day) apptUpdates.day = updates.day;
+  if (updates.time) apptUpdates.time = updates.time;
+  if (updates.provider) apptUpdates.provider = updates.provider;
+  const { error } = await supabase
+    .from('appointments')
+    .update(apptUpdates)
+    .eq('referral_id', referralId)
+    .eq('status', 'confirmed');
+  if (updates.location) {
+    await supabase.from('referrals').update({ location: updates.location }).eq('id', referralId);
+  }
+  await supabase.from('audit_log').insert({ referral_id: referralId, what: 'Appointment details edited' });
+  return { success: !error };
+}
+
+export async function deleteCalendarEvent(
+  referralId: string,
+): Promise<{ success: boolean }> {
+  if (USE_MOCK) {
+    const ref = _referrals.find(r => r.id === referralId);
+    if (ref) {
+      ref.bookedAppointment = undefined;
+      ref.state = 'Pending Confirmation';
+    }
+    return { success: true };
+  }
+  const now = new Date().toISOString();
+  const [{ error: e1 }, { error: e2 }] = await Promise.all([
+    supabase
+      .from('appointments')
+      .update({ status: 'cancelled' })
+      .eq('referral_id', referralId)
+      .eq('status', 'confirmed'),
+    supabase
+      .from('referrals')
+      .update({ state: 'Pending Confirmation', updated_at: now })
+      .eq('id', referralId),
+  ]);
+  await supabase.from('audit_log').insert({ referral_id: referralId, what: 'Appointment cancelled — returned to Pending Confirmation' });
+  return { success: !e1 && !e2 };
+}
+
 // ── Pipeline / analytics ──────────────────────────────────────────────────────
 
 export async function getPipeline(): Promise<PipelineCount[]> {
@@ -524,7 +593,7 @@ export async function getDashboardCallActivity() {
 
 const SETTINGS_KEY = 'relay_practice_settings';
 
-const VALID_CALL_ORDERS = ['chronological', 'urgent_first', 'most_recent', 'fewest_attempts'] as const;
+const VALID_CALL_ORDERS = ['chronological', 'urgent_first', 'all', 'fewest_attempts'] as const;
 
 const _defaultSettings: PracticeSettings = {
   cadence: { intervalMinutes: 5, maxCallsPerSession: 10, callOrder: 'chronological' },

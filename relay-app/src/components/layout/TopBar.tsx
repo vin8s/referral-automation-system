@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Icon } from '@/components/shared/Icon';
 import { StatePill } from '@/components/shared/StatePill';
 import { CommandPalette } from '@/components/shared/CommandPalette';
+import { useCallQueue } from '@/contexts/CallQueueContext';
 import { getReferrals } from '@/lib/data';
 import type { Referral } from '@/lib/types';
 
@@ -416,6 +417,7 @@ function TopBarSearch({ onOpenPalette }: { onOpenPalette: () => void }) {
 // ── TopBar ────────────────────────────────────────────────────────────────────
 
 function TopBarInner() {
+  const { toggleQueue } = useCallQueue();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -431,10 +433,14 @@ function TopBarInner() {
         e.preventDefault();
         setPaletteOpen(true);
       }
+      if (e.key === 'r' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        toggleQueue();
+      }
     }
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [toggleQueue]);
 
   const unreadCount = notifs.filter(n => !n.read).length;
 
@@ -494,8 +500,8 @@ function TopBarInner() {
           )}
         </div>
 
-        <button className="tb-avatar" title="Priya N. — Medical assistant" aria-label="Account">
-          P
+        <button className="tb-avatar" title="Saajan P." aria-label="Account">
+          S
         </button>
       </div>
     </div>

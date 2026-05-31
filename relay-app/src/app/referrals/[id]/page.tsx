@@ -11,6 +11,7 @@ import {
   createCapturedSlot,
   patchLatestTranscript,
   getBookedSlotKeys,
+  normalizeTime,
 } from "@/lib/data";
 import { useActiveCall } from "@/contexts/ActiveCallContext";
 import { StatePill } from "@/components/shared/StatePill";
@@ -101,11 +102,11 @@ function outcomeLabel(result: ElevenLabsCallResult): Attempt["outcome"] {
   );
   if (appointmentCaptured || s === "success") return "Appointment Accepted";
 
-  if (reason === "agent_ended_call" || reason === "user_ended_call")
-    return "Booked";
   if (reason === "voicemail") return "Voicemail Left";
   if (reason === "no_answer") return "No Answer";
-  return "No Answer";
+  // Any other termination (agent_ended_call, user_ended_call, unexpected reason, etc.)
+  // defaults to Appointment Accepted → Pending Confirmation so nothing slips past MA review.
+  return "Appointment Accepted";
 }
 
 // Maps each call outcome to the resulting referral state per REFERRAL_STATUSES.md
@@ -116,7 +117,6 @@ const OUTCOME_TO_STATE: Record<string, ReferralState> = {
   "Identity Verified": "In Progress",
   Interested: "In Progress",
   "Appointment Accepted": "Pending Confirmation",
-  Booked: "Booked",
   "Transferred to Staff": "Pending Confirmation",
   "Declined Referral": "In Progress",
   "Wrong Number": "Escalated",
@@ -652,6 +652,11 @@ export default function ReferralDetailPage() {
       const date_format_instruction =
         "When mentioning any appointment date or time, always say the full day of the week and the date together — for example 'Tuesday, June 11th at 4:00 PM', never just 'June 11th at 4 PM' or 'Tuesday at 4 PM'.";
 
+      const isSpanish = referral.patient.language?.toLowerCase().includes("spanish");
+      const conversationConfigOverride = isSpanish ? {
+        agent: { language: "es" },
+      } : undefined;
+
       const res = await fetch("/api/calls/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -675,12 +680,14 @@ export default function ReferralDetailPage() {
             referral_reason: referral.reason,
             preferred_location: referral.location,
             practice_name: "Bay Cardiology",
-            practice_phone_number: "",
+            practice_phone_number: "919-465-3178",
             today_date: todayDate,
             available_slots_summary,
             available_slots_json,
             date_format_instruction,
+            agent_name: "Sarah",
           },
+          ...(conversationConfigOverride ? { conversationConfigOverride } : {}),
         }),
       });
       const data = await res.json();
@@ -827,7 +834,9 @@ export default function ReferralDetailPage() {
       const summaryTime = summaryTimeMatch
         ? summaryTimeMatch[1].replace(/\s+/, " ").toUpperCase()
         : undefined;
-      const time = fromTranscript.time ?? summaryTime ?? (rawTime || "TBD");
+      const rawTimeValue = fromTranscript.time ?? summaryTime ?? (rawTime || "TBD");
+      // Normalize to "H:MM AM/PM" so calendar placement and booked-key lookup both work
+      const time = rawTimeValue === "TBD" ? "TBD" : normalizeTime(rawTimeValue);
       const provider = String((dcr.provider ?? dcr.doctor ?? dcr.physician)?.value ?? currentReferral.referringProvider ?? "TBD");
       saves.push(createCapturedSlot(currentReferral.id, { day, time, provider }));
     }

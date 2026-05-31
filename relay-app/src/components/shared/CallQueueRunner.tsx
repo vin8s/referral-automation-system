@@ -38,14 +38,34 @@ function outcomeColor(outcome: CallOutcome): string {
   return 'var(--relay-ink-2)';
 }
 
+
 // ── Sorting ───────────────────────────────────────────────────────────────────
 
 const CALL_ORDER_LABELS: Record<CallOrderMode, string> = {
   chronological:   'Chronological',
   urgent_first:    'Urgent first',
-  most_recent:     'Most recent',
+  all:             'All',
   fewest_attempts: 'Fewest attempts',
 };
+
+// Parses referralTime strings like "Apr 14, 8:21 AM" or "May 28, 2026, 10:22 AM"
+// into a sortable timestamp. Falls back to 0 so unknown formats sort to the front.
+const _MONTH_IDX: Record<string, number> = {
+  Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11,
+};
+function parseReferralTime(s: string): number {
+  const clean = s.replace(' · ', ' ');
+  const m = clean.match(/(\w{3})\s+(\d{1,2})(?:,\s*(\d{4}))?,\s*(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!m) return 0;
+  const month = _MONTH_IDX[m[1]] ?? 0;
+  const day = parseInt(m[2], 10);
+  const year = m[3] ? parseInt(m[3], 10) : 2026;
+  let h = parseInt(m[4], 10);
+  const min = parseInt(m[5], 10);
+  if (m[6].toUpperCase() === 'PM' && h !== 12) h += 12;
+  if (m[6].toUpperCase() === 'AM' && h === 12) h = 0;
+  return new Date(year, month, day, h, min).getTime();
+}
 
 function refId(r: Referral): number {
   return parseInt(r.id.replace(/\D/g, ''), 10) || 0;
@@ -54,8 +74,14 @@ function refId(r: Referral): number {
 function sortByCallOrder(referrals: Referral[], order: CallOrderMode): Referral[] {
   const copy = [...referrals];
   switch (order) {
-    case 'chronological':
-      return copy.sort((a, b) => refId(a) - refId(b));
+    case 'chronological': {
+      // Uncontacted (Queued / In Progress) first, then Attempted — each group ordered by referral time
+      const byTime = (a: Referral, b: Referral) =>
+        parseReferralTime(a.referralTime) - parseReferralTime(b.referralTime);
+      const uncontacted = copy.filter(r => r.state === 'Queued' || r.state === 'In Progress').sort(byTime);
+      const attempted   = copy.filter(r => r.state === 'Attempted').sort(byTime);
+      return [...uncontacted, ...attempted];
+    }
     case 'urgent_first':
       return copy.sort((a, b) => {
         const urgA = a.priority === 'urgent' ? 0 : 1;
@@ -63,8 +89,12 @@ function sortByCallOrder(referrals: Referral[], order: CallOrderMode): Referral[
         if (urgA !== urgB) return urgA - urgB;
         return refId(a) - refId(b);
       });
-    case 'most_recent':
-      return copy.sort((a, b) => refId(b) - refId(a));
+    case 'all': {
+      // Chronological across ALL patients — no attempt-count exclusion
+      const byTime = (a: Referral, b: Referral) =>
+        parseReferralTime(a.referralTime) - parseReferralTime(b.referralTime);
+      return copy.sort(byTime);
+    }
     case 'fewest_attempts':
       return copy.sort((a, b) => {
         if (a.attempts.length !== b.attempts.length) return a.attempts.length - b.attempts.length;
@@ -124,8 +154,8 @@ function useResize(initial: { w: number; h: number }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function CallQueueRunner() {
-  const { isOpen, closeQueue } = useCallQueue();
-  const [minimized, setMinimized] = useState(false);
+  const { isOpen, minimized, setMinimized, closeQueue } = useCallQueue();
+  const router = useRouter();
   const { size, startResizeW, startResizeH, startResizeCorner } = useResize({ w: 480, h: 560 });
   const [sessionState, setSessionState] = useState<SessionState>('loading');
   const [cadence, setCadence] = useState<CadenceConfig>({ intervalMinutes: 5, maxCallsPerSession: 10, callOrder: 'chronological' });
@@ -134,36 +164,73 @@ export function CallQueueRunner() {
   const [callPhase, setCallPhase] = useState<CallProgress['phase']>('initiating');
   const [completed, setCompleted] = useState<CallRecord[]>([]);
   const [countdown, setCountdown] = useState(0);
+  const [skipping, setSkipping] = useState(false);
   const stopRef = useRef<{ aborted: boolean }>({ aborted: false });
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownResolveRef = useRef<(() => void) | null>(null);
 
-  // Reset and reload when opened
-  useEffect(() => {
-    if (!isOpen) return;
-    setMinimized(false);
-    setSessionState('loading');
-    setCurrentIdx(0);
-    setCompleted([]);
-    setCountdown(0);
-    stopRef.current.aborted = false;
+  const loadQueue = useCallback((resetSession = false) => {
+    if (resetSession) {
+      setSessionState('loading');
+      setCurrentIdx(0);
+      setCompleted([]);
+      setCountdown(0);
+      setSkipping(false);
+      stopRef.current.aborted = false;
+    }
     Promise.all([getSettings(), getReferrals()]).then(([settings, referrals]) => {
       setCadence(settings.cadence);
-      const eligible = referrals.filter(r =>
-        r.state === 'Queued' || r.state === 'In Progress'
-      );
+      const isAllMode = settings.cadence.callOrder === 'all';
+      const eligible = referrals.filter(r => {
+        if (r.state === 'Queued' || r.state === 'In Progress') return true;
+        if (r.state === 'Attempted') return isAllMode || r.attempts.length < 3;
+        return false;
+      });
       const sorted = sortByCallOrder(eligible, settings.cadence.callOrder);
       setQueue(sorted.slice(0, settings.cadence.maxCallsPerSession));
       setSessionState('ready');
     });
-  }, [isOpen]);
+  }, []);
+
+  // Lightweight refresh — updates patient data in the existing queue without
+  // resetting session state, position, or completed records.
+  const refreshPatientData = useCallback(() => {
+    getReferrals().then(fresh => {
+      const byId = new Map(fresh.map(r => [r.id, r]));
+      setQueue(prev => prev.map(r => byId.get(r.id) ?? r));
+    });
+  }, []);
+
+  // Reset and reload when opened
+  useEffect(() => {
+    if (!isOpen) return;
+    loadQueue(true);
+  }, [isOpen, loadQueue]);
+
+  // Poll for patient data updates every 5s whenever the queue is open
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = setInterval(refreshPatientData, 5000);
+    return () => clearInterval(id);
+  }, [isOpen, refreshPatientData]);
+
+  // Refresh immediately when the browser tab regains focus
+  useEffect(() => {
+    if (!isOpen) return;
+    const onFocus = () => refreshPatientData();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [isOpen, refreshPatientData]);
 
   const startCountdown = useCallback((secs: number, onDone: () => void) => {
     setCountdown(secs);
     setSessionState('countdown');
+    countdownResolveRef.current = onDone;
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
           clearInterval(countdownRef.current!);
+          countdownResolveRef.current = null;
           onDone();
           return 0;
         }
@@ -181,15 +248,17 @@ export function CallQueueRunner() {
       setCallPhase('initiating');
 
       const referral = currentQueue[i];
+      let outcome: CallOutcome = 'No Answer';
       try {
         const result = await runAndSaveCall(
           referral,
           p => setCallPhase(p.phase),
           stopRef.current,
         );
-        setCompleted(prev => [...prev, { referralId: referral.id, patient: referral.patient.name, outcome: result.outcome }]);
+        outcome = result.outcome;
+        setCompleted(prev => [...prev, { referralId: referral.id, patient: referral.patient.name, outcome }]);
       } catch {
-        setCompleted(prev => [...prev, { referralId: referral.id, patient: referral.patient.name, outcome: 'No Answer' }]);
+        setCompleted(prev => [...prev, { referralId: referral.id, patient: referral.patient.name, outcome }]);
       }
 
       if (stopRef.current.aborted) break;
@@ -219,6 +288,9 @@ export function CallQueueRunner() {
   function skipCountdown() {
     if (countdownRef.current) clearInterval(countdownRef.current);
     setCountdown(0);
+    const resolve = countdownResolveRef.current;
+    countdownResolveRef.current = null;
+    if (resolve) resolve();
   }
 
   function handleClose() {
@@ -229,7 +301,6 @@ export function CallQueueRunner() {
 
   if (!isOpen) return null;
 
-  const router = useRouter();
   const isSessionActive = sessionState === 'running' || sessionState === 'countdown';
   const currentReferral = queue[currentIdx];
   const remaining = queue.length - currentIdx - (sessionState === 'done' ? 0 : 1);
@@ -429,7 +500,7 @@ export function CallQueueRunner() {
         {/* Running / countdown */}
         {(sessionState === 'running' || sessionState === 'countdown') && currentReferral && (
           <>
-            <CurrentCallCard referral={currentReferral} phase={callPhase} sessionState={sessionState} />
+            <CurrentCallCard referral={currentReferral} phase={callPhase} sessionState={sessionState} skipping={skipping} onNavigate={id => router.push(`/referrals/${id}`)} />
 
             {sessionState === 'countdown' && (
               <div style={{ background: 'var(--relay-tint)', borderRadius: 10, padding: '12px 14px' }}>
@@ -508,32 +579,40 @@ export function CallQueueRunner() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function CurrentCallCard({ referral, phase, sessionState }: {
+function CurrentCallCard({ referral, phase, sessionState, skipping, onNavigate }: {
   referral: Referral;
   phase: CallProgress['phase'];
   sessionState: SessionState;
+  skipping?: boolean;
+  onNavigate: (id: string) => void;
 }) {
   const phaseLabel: Record<CallProgress['phase'], string> = {
-    initiating: 'Connecting to ElevenLabs…',
+    initiating: 'Initiating call…',
     calling:    'Dialing patient…',
     polling:    'Call in progress…',
     saving:     'Saving call result…',
-    done:       sessionState === 'countdown' ? 'Call complete' : 'Done',
+    done:       skipping ? 'No answer — moving to next patient…' : sessionState === 'countdown' ? 'Call complete' : 'Done',
     error:      'Call failed',
   };
 
   return (
     <div style={{
-      border: '1.5px solid var(--relay-accent)',
+      border: `1.5px solid ${skipping ? 'var(--relay-hairline)' : 'var(--relay-accent)'}`,
       borderRadius: 10, padding: '12px 14px',
-      background: 'var(--relay-accent-50)',
-    }}>
+      background: skipping ? 'var(--relay-tint)' : 'var(--relay-accent-50)',
+      cursor: 'pointer',
+    }}
+      onClick={() => onNavigate(referral.id)}
+      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.filter = 'brightness(0.97)'; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.filter = ''; }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
         <div style={{
           width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
-          background: 'var(--relay-accent-100)',
+          background: skipping ? 'var(--relay-tint)' : 'var(--relay-accent-100)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 12, fontWeight: 700, color: 'var(--relay-accent-700)',
+          fontSize: 12, fontWeight: 700,
+          color: skipping ? 'var(--relay-ink-3)' : 'var(--relay-accent-700)',
         }}>
           {referral.patient.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
         </div>
@@ -544,13 +623,16 @@ function CurrentCallCard({ referral, phase, sessionState }: {
           </div>
         </div>
         <StatePill state={referral.state} />
+        <Icon name="arrow" size={12} style={{ color: 'var(--relay-ink-4)', flexShrink: 0 }} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{
           width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-          background: phase === 'error' ? 'var(--relay-urgent)' : 'var(--relay-accent)',
+          background: phase === 'error' ? 'var(--relay-urgent)' : skipping ? 'var(--relay-ink-3)' : 'var(--relay-accent)',
         }} />
-        <span style={{ fontSize: 12.5, color: 'var(--relay-ink-2)' }}>{phaseLabel[phase]}</span>
+        <span style={{ fontSize: 12.5, color: skipping ? 'var(--relay-ink-3)' : 'var(--relay-ink-2)' }}>
+          {phaseLabel[phase]}
+        </span>
       </div>
     </div>
   );

@@ -44,10 +44,10 @@ function fmtInterval(mins: number): string {
 }
 
 const CALL_ORDER_OPTIONS: { value: CallOrderMode; label: string; sub: string; icon: string }[] = [
-  { value: 'chronological',   label: 'Chronological',    sub: 'Patients referred first are called first (FIFO)',          icon: 'history'     },
-  { value: 'urgent_first',    label: 'Urgent first',     sub: 'Urgent-priority patients called before standard',          icon: 'alert'       },
-  { value: 'most_recent',     label: 'Most recent',      sub: 'Newest referrals are called first',                        icon: 'cal'         },
-  { value: 'fewest_attempts', label: 'Fewest attempts',  sub: 'Patients with least prior outreach are called first',      icon: 'phone'       },
+  { value: 'chronological',   label: 'Chronological',    sub: 'Patients referred first are called first, uncontacted only',  icon: 'history'     },
+  { value: 'urgent_first',    label: 'Urgent first',     sub: 'Urgent-priority patients called before standard',              icon: 'alert'       },
+  { value: 'all',             label: 'All',              sub: 'All patients in referral order, regardless of prior contact',  icon: 'list'        },
+  { value: 'fewest_attempts', label: 'Fewest attempts',  sub: 'Patients with least prior outreach are called first',          icon: 'phone'       },
 ];
 
 function CadenceSettings() {

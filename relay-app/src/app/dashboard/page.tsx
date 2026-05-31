@@ -521,8 +521,8 @@ export default function DashboardPage() {
   return (
     <>
       <PageHead
-        title="Good morning, Priya"
-        sub={`Today is Apr 14 · ${inMotion || '—'} referrals in motion`}
+        title={`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, Saajan`}
+        sub={`Today is ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
       >
         <button className="btn btn-sm btn-primary" onClick={openQueue}>
           <Icon name="phone" size={12} /> Run Queue

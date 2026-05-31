@@ -255,9 +255,9 @@ export interface ReferralLogEntry {
 }
 
 export type CallOrderMode =
-  | 'chronological'    // oldest referral first (FIFO)
+  | 'chronological'    // oldest referral first (FIFO), uncontacted only
   | 'urgent_first'     // urgent priority first, then chronological
-  | 'most_recent'      // newest referral first
+  | 'all'              // chronological, all patients regardless of attempt count
   | 'fewest_attempts'; // least-attempted patients first
 
 export interface CadenceConfig {

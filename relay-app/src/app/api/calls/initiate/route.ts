@@ -14,15 +14,20 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { toNumber: string; referralId: string; dynamicVariables?: Record<string, string> };
+  let body: {
+    toNumber: string;
+    referralId: string;
+    dynamicVariables?: Record<string, string>;
+    conversationConfigOverride?: Record<string, unknown>;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { toNumber, referralId, dynamicVariables } = body;
-  if (!toNumber) {1
+  const { toNumber, referralId, dynamicVariables, conversationConfigOverride } = body;
+  if (!toNumber) {
     return NextResponse.json({ error: 'toNumber is required' }, { status: 400 });
   }
 
@@ -32,9 +37,13 @@ export async function POST(request: Request) {
     to_number: toNumber,
   };
 
-  if (dynamicVariables && Object.keys(dynamicVariables).length > 0) {
+  const hasVars = dynamicVariables && Object.keys(dynamicVariables).length > 0;
+  const hasOverride = conversationConfigOverride && Object.keys(conversationConfigOverride).length > 0;
+
+  if (hasVars || hasOverride) {
     payload.conversation_initiation_client_data = {
-      dynamic_variables: dynamicVariables,
+      ...(hasVars ? { dynamic_variables: dynamicVariables } : {}),
+      ...(hasOverride ? { conversation_config_override: conversationConfigOverride } : {}),
     };
   }
 

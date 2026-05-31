@@ -68,7 +68,7 @@ function formatDisplayPhone(phone: string): string {
   return phone;
 }
 
-function parseRows(sheetRows: Record<string, string>[], existingPhones: Set<string>): ParsedRow[] {
+function parseRows(sheetRows: Record<string, unknown>[], existingPhones: Set<string>): ParsedRow[] {
   return sheetRows.map((row, idx) => {
     const parsed: Partial<ParsedRow> & { flags: string[]; _rawIndex: number } = {
       _rawIndex: idx,
@@ -79,8 +79,11 @@ function parseRows(sheetRows: Record<string, string>[], existingPhones: Set<stri
 
     for (const [header, value] of Object.entries(row)) {
       const field = normaliseHeader(header);
-      if (field && value != null && String(value).trim() !== '') {
-        (parsed as Record<string, unknown>)[field] = String(value).trim();
+      if (field && value != null) {
+        const strVal = value instanceof Date
+          ? `${String(value.getMonth() + 1).padStart(2, '0')}/${String(value.getDate()).padStart(2, '0')}/${value.getFullYear()}`
+          : String(value).trim();
+        if (strVal !== '') (parsed as Record<string, unknown>)[field] = strVal;
       }
     }
 
@@ -163,7 +166,7 @@ export default function IngestPage() {
       const buf = await file.arrayBuffer();
       const wb = xlsxRead(buf, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw: Record<string, string>[] = xlsxUtils.sheet_to_json(ws, { defval: '' });
+      const raw: Record<string, unknown>[] = xlsxUtils.sheet_to_json(ws, { defval: '' });
 
       if (raw.length === 0) {
         setParseError('The spreadsheet appears to be empty. Check that the first sheet has data and a header row.');
@@ -181,20 +184,8 @@ export default function IngestPage() {
         return;
       }
 
-      // We'd compare against real referrals in phase 2; for now compare uploaded phones among themselves
       const seenPhones = new Set<string>();
       const parsed = parseRows(raw, seenPhones);
-      // Mark cross-row duplicates (same phone appears twice in the upload)
-      const phoneCounts: Record<string, number> = {};
-      for (const r of parsed) {
-        if (r.phone && isValidPhone(r.phone)) phoneCounts[r.phone] = (phoneCounts[r.phone] ?? 0) + 1;
-      }
-      for (const r of parsed) {
-        if (r.phone && phoneCounts[r.phone] > 1 && !r.flags.includes('Possible duplicate')) {
-          r.flags.push('Duplicate in upload');
-        }
-      }
-
       setRows(parsed);
     } catch {
       setParseError('Could not parse this file. Make sure it is a valid .xlsx or .xls file.');

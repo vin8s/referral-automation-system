@@ -77,6 +77,8 @@ export function Icon({ name, size = 16, className, style }: IconProps) {
       return <svg width={s} height={s} viewBox="0 0 16 16" fill="none" className={cls}><rect x="2" y="3" width="12" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.25"/><path d="M5 14l1.5-2h3L11 14" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/><path d="M5 7h6M5 9.5h4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/></svg>;
     case 'refresh':
       return <svg width={s} height={s} viewBox="0 0 14 14" fill="none" className={cls}><path d="M2 7a5 5 0 005 5 5 5 0 004.8-3.6M12 7a5 5 0 00-5-5 5 5 0 00-4.8 3.6" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/><path d="M2 4v3h3M12 10v-3h-3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    case 'trash':
+      return <svg width={s} height={s} viewBox="0 0 14 14" fill="none" className={cls}><path d="M2 4h10M5 4V3a1 1 0 011-1h2a1 1 0 011 1v1M5.5 6.5v4M8.5 6.5v4M3 4l.7 7a1 1 0 001 .9h4.6a1 1 0 001-.9L11 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></svg>;
     default:
       return <svg width={s} height={s} viewBox="0 0 16 16" className={cls}><circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.25" fill="none"/></svg>;
   }
