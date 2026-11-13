@@ -21,6 +21,7 @@ import { StatePicker } from "@/components/shared/StatePicker";
 import { Avatar } from "@/components/shared/Avatar";
 import { Icon } from "@/components/shared/Icon";
 import { TranscriptPanel } from "@/components/shared/TranscriptPanel";
+import { buildUpcomingSlots } from "@/lib/slots";
 import type {
   Referral,
   ReferralState,
@@ -226,45 +227,6 @@ function normalizeSlotDay(raw: string): string {
   }
 
   return raw; // give up — calendar will filter it out
-}
-
-// Returns n upcoming weekday slots with pre-formatted spoken labels so the agent
-// mirrors the exact format ("Tuesday, June 11th at 4:00 PM") when reading them aloud.
-const ALL_SLOT_TIMES = ["9:00 AM", "10:30 AM", "2:00 PM", "4:00 PM"];
-const MONTH_S_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const DAY_S_SHORT   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-
-function buildUpcomingSlots(n: number, bookedKeys: Set<string> = new Set()) {
-  const slots: { spoken_date: string; weekday: string; date: string; times: string[]; spoken_options: string[] }[] = [];
-  const cursor = new Date();
-  cursor.setDate(cursor.getDate() + 1);
-  cursor.setHours(0, 0, 0, 0);
-  while (slots.length < n) {
-    const dow = cursor.getDay();
-    if (dow !== 0 && dow !== 6) {
-      const weekday = cursor.toLocaleDateString("en-US", { weekday: "long" });
-      const monthDay = cursor.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-      const year = cursor.getFullYear();
-      const day = cursor.getDate();
-      const suffix = day === 1 || day === 21 || day === 31 ? "st"
-        : day === 2 || day === 22 ? "nd"
-        : day === 3 || day === 23 ? "rd" : "th";
-      const spoken_date = `${weekday}, ${monthDay.replace(/\d+/, `${day}${suffix}`)}`;
-      const dayKey = `${DAY_S_SHORT[cursor.getDay()]} ${MONTH_S_SHORT[cursor.getMonth()]} ${cursor.getDate()}`;
-      const times = ALL_SLOT_TIMES.filter(t => !bookedKeys.has(`${dayKey}|${t}`));
-      if (times.length > 0) {
-        slots.push({
-          spoken_date,
-          weekday,
-          date: `${monthDay}, ${year}`,
-          times,
-          spoken_options: times.map((t) => `${spoken_date} at ${t}`),
-        });
-      }
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return slots;
 }
 
 // ── Call confirmation modal ───────────────────────────────────────────────────

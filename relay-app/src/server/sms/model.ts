@@ -1,0 +1,254 @@
+// SMS agent model adapters behind one interface (swap via AI_PROVIDER=mock|bedrock).
+//
+//   mock (default): deterministic rule-based stand-in for local demos and tests.
+//                   NOT a safety layer and NOT production behavior.
+//   bedrock:        Claude on Amazon Bedrock via the Bedrock Runtime Converse API,
+//                   model BEDROCK_MODEL_ID, tool `sms_turn` with the JSON schema from
+//                   docs/SMS_AGENT_PROMPT.md §4.
+//
+// The model only ever receives: clinic name, patient FIRST name, the SMS thread,
+// and the turn context (SMS_AGENT_PROMPT §3). Never the DOB, referral reason or specialty.
+
+import 'server-only';
+import { buildSystemPrompt, SMS_TURN_SCHEMA, TURN_CONTEXT_NOTE } from './prompt';
+import { detectEmergency, normalizeDob, normalizeText, redTemplateFor } from './guards';
+import type { ModelInput, SmsTurnOutput } from './types';
+
+export interface SmsAgentModel {
+  readonly name: 'mock' | 'bedrock' | 'scripted';
+  /** Returns the raw tool input (validated by the caller), or throws on transport errors. */
+  turn(input: ModelInput): Promise<unknown>;
+}
+
+// ── Mock ────────────────────────────────────────────────────────────────────
+
+function base(lang: 'en' | 'es'): SmsTurnOutput {
+  return {
+    reply_text: null, use_template: null, language: lang, language_switch_request: null, intent: 'other',
+    identity: { dob_candidate: null, says_not_patient: false, says_is_proxy: false },
+    captured_slot: null, preferences: null, friction: [],
+    escalation: { tier: 'none', reason_code: null, pause_automation: false, staff_summary: null },
+    opt_out: false, help_requested: false, wrong_number: false, call_outcome: null, conversation_complete: false,
+  };
+}
+
+const ORDINALS: [RegExp, number][] = [
+  [/^(1|one|uno|the first( one)?|first( one)?|la primera|el primero|primera|primero|#1|option 1)$/, 0],
+  [/^(2|two|dos|the second( one)?|second( one)?|la segunda|el segundo|segunda|segundo|#2|option 2)$/, 1],
+  [/^(3|three|tres|the third( one)?|third( one)?|la tercera|el tercero|tercera|tercero|#3|option 3)$/, 2],
+];
+const DAY_NAMES: [RegExp, number][] = [
+  [/\b(mon|monday|lunes)\b/, 1], [/\b(tue|tues|tuesday|martes)\b/, 2], [/\b(wed|wednesday|miercoles)\b/, 3],
+  [/\b(thu|thur|thurs|thursday|jueves)\b/, 4], [/\b(fri|friday|viernes)\b/, 5], [/\b(sat|saturday|sabado)\b/, 6],
+];
+
+/** Deterministic stand-in good enough to demo the flow locally. */
+export class MockSmsAgentModel implements SmsAgentModel {
+  readonly name = 'mock' as const;
+
+  async turn(input: ModelInput): Promise<SmsTurnOutput> {
+    const ctx = input.context;
+    const lang = ctx.locked_language;
+    const es = lang === 'es';
+    const t = normalizeText(input.patientMessage);
+    const out = base(lang);
+    const amber = (code: string, pause: boolean, summary: string, template: SmsTurnOutput['use_template'] = pause ? 'human_handoff' : null) => {
+      out.escalation = { tier: 'amber', reason_code: code, pause_automation: pause, staff_summary: summary };
+      out.use_template = template;
+      return out;
+    };
+
+    const red = detectEmergency(input.patientMessage)
+      ?? (/\bchest pain\b|\bdolor de pecho\b/.test(t) && !/\blast year\b|\byears ago\b|\bel ano pasado\b/.test(t) ? { code: 'emergency_medical' as const } : null);
+    if (red) {
+      out.intent = red.code === 'suicide_self_harm' ? 'crisis_self_harm' : 'emergency';
+      out.escalation = { tier: 'red', reason_code: red.code, pause_automation: true, staff_summary: `Patient texted: "${input.patientMessage.slice(0, 200)}"` };
+      out.use_template = redTemplateFor(red.code);
+      out.call_outcome = 'Escalated';
+      return out;
+    }
+    if (/\b(stop|dont) text(ing)? me\b|\btake me off\b|\bno me manden\b|\bno me escriban\b|\bno quiero mas (textos|mensajes)\b|\bstop harassing\b/.test(t)) {
+      out.intent = 'opt_out'; out.opt_out = true; out.use_template = 'stop_confirmation'; return out;
+    }
+    if (/\bwrong number\b|\bdont know (this|that) person\b|\bnumero equivocado\b|\bno conozco\b|\bno soy esa persona\b/.test(t)) {
+      out.intent = 'wrong_number'; out.wrong_number = true; out.use_template = 'wrong_number'; out.call_outcome = 'Wrong Number';
+      out.escalation = { tier: 'amber', reason_code: 'wrong_number', pause_automation: true, staff_summary: 'Person says this is a wrong number.' };
+      return out;
+    }
+    if (/\b(im|soy) (her|his|la|el) (daughter|son|wife|husband|mom|mother|hija|hijo|esposa|esposo|mama)\b|\bsoy (la|el) (hija|hijo|esposa|esposo)\b/.test(t)) {
+      out.intent = 'proxy_or_caregiver'; out.identity.says_is_proxy = true;
+      return amber('proxy_or_caregiver', true, 'Someone other than the patient is replying.');
+    }
+    if (/\b(real person|human|someone call|talk to (a )?(person|someone))\b|\bhablar con (alguien|una persona)\b|\bpersona de verdad\b/.test(t) && !/\bare you\b|\busted es\b/.test(t)) {
+      out.intent = 'human_request'; return amber('human_requested', true, 'Patient asked for a person.');
+    }
+    if (/\b(are you|is this) (a )?(bot|robot|real|ai|computer)\b|\busted es (una persona|un robot)\b|\bpersona de verdad\b/.test(t)) {
+      out.intent = 'ai_question';
+      out.reply_text = es
+        ? 'Sí, soy un asistente automatizado (IA). Si quiere, le pido a alguien del personal que se comunique con usted.'
+        : "Yes, I'm an automated assistant (AI). I can ask a staff member to contact you if you'd like.";
+      return out;
+    }
+    if (/\b(cost|price|pay|insurance|medicaid|medicare)\b|\bcuanto cuesta\b|\bseguro\b/.test(t)) {
+      out.intent = 'cost_insurance_question'; out.friction = ['cost'];
+      out.reply_text = es
+        ? 'No puedo responder preguntas de costos, pero alguien del personal le va a contactar. ¿Quiere escoger un horario mientras tanto?'
+        : "I can't answer cost questions, but a staff member will contact you about it. Want to pick a time meanwhile?";
+      return amber('cost_insurance_question', false, 'Patient asked about cost or insurance.', null);
+    }
+    if (/\b(why|what).{0,20}(referr|for)\b|\bpara que es\b|\bshould i (stop|take)\b|\bis (this|it) serious\b/.test(t)) {
+      out.intent = 'clinical_question'; return amber('clinical_question', true, 'Patient asked a clinical question.');
+    }
+    if (/\bnot interested\b|\bno quiero la cita\b|\bno gracias\b/.test(t)) {
+      out.intent = 'decline'; out.call_outcome = 'Declined Referral';
+      return amber('declined', true, 'Patient declined the appointment.');
+    }
+    if (/\bwho is this\b|\bquien (es|habla)\b/.test(t)) {
+      out.intent = 'who_is_this';
+      out.reply_text = es
+        ? `Soy el asistente automatizado (IA) de ${input.clinicName}. Queremos hablar con ${input.patientFirstName} sobre una cita. ¿Es usted ${input.patientFirstName}?`
+        : `I'm the automated assistant (AI) for ${input.clinicName}. We're trying to reach ${input.patientFirstName} about scheduling an appointment. Is this ${input.patientFirstName}?`;
+      return out;
+    }
+    if (/\b(in|en) (spanish|espanol)\b/.test(t)) { out.language_switch_request = 'es'; out.language = 'es'; }
+    if (/\b(in|en) (english|ingles)\b/.test(t)) { out.language_switch_request = 'en'; out.language = 'en'; }
+
+    if (!ctx.identity_verified) {
+      const dob = normalizeDob(input.patientMessage);
+      if (dob) { out.intent = 'identity_response'; out.identity.dob_candidate = dob; return out; }
+      out.reply_text = out.language === 'es'
+        ? 'Para proteger su privacidad, por favor responda con su fecha de nacimiento (MM/DD/AAAA).'
+        : 'To protect your privacy, please reply with your date of birth (MM/DD/YYYY).';
+      return out;
+    }
+
+    // Verified: slot pick.
+    const slots = ctx.offered_slots;
+    let pick: number | null = null;
+    for (const [re, i] of ORDINALS) if (re.test(t)) pick = i;
+    if (pick === null) {
+      const days = DAY_NAMES.filter(([re]) => re.test(t)).map(([, d]) => d);
+      if (days.length === 1) {
+        const matches = slots.map((s, i) => ({ i, s })).filter(x => dowOf(x.s.start) === days[0]);
+        if (matches.length === 1) pick = matches[0].i;
+      }
+    }
+    if (pick !== null && slots[pick]) {
+      out.intent = 'slot_selected'; out.use_template = 'slot_captured'; out.call_outcome = 'Appointment Accepted';
+      out.captured_slot = { slot_id: slots[pick].slot_id, patient_text: input.patientMessage.slice(0, 200) };
+      out.conversation_complete = true;
+      return out;
+    }
+    if (/\bnone\b|\bninguno\b|\bno (me )?sirve\b|\bdont work\b/.test(t)) {
+      out.intent = 'no_slot_works';
+      return amber('no_slot_works', true, 'None of the offered times work for the patient.', null);
+    }
+    out.intent = 'slot_question';
+    out.use_template = 'slot_offer';
+    return out;
+  }
+}
+
+function dowOf(isoWithOffset: string): number {
+  // The local weekday is encoded in the label-independent ISO date part (YYYY-MM-DD before 'T').
+  const [y, m, d] = isoWithOffset.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+// ── Bedrock (Converse API) ─────────────────────────────────────────────────
+
+type ConverseMessage = { role: 'user' | 'assistant'; content: { text: string }[] };
+
+/** Strips anything that could look like our own context markers out of patient text. */
+function sanitizePatientText(s: string): string {
+  return s.replace(/<\/?\s*turn_context[^>]*>/gi, '').slice(0, 1600);
+}
+
+export class BedrockSmsAgentModel implements SmsAgentModel {
+  readonly name = 'bedrock' as const;
+  /** Newer Claude models reject a forced tool_choice; after one such error we use `auto` + the prompt instruction. */
+  private forceToolSupported = true;
+  private client: Promise<import('@aws-sdk/client-bedrock-runtime').BedrockRuntimeClient> | null = null;
+
+  private getClient() {
+    if (!this.client) {
+      this.client = import('@aws-sdk/client-bedrock-runtime').then(
+        ({ BedrockRuntimeClient }) => new BedrockRuntimeClient({ region: process.env.AWS_REGION }),
+      );
+    }
+    return this.client;
+  }
+
+  async turn(input: ModelInput): Promise<unknown> {
+    const modelId = process.env.BEDROCK_MODEL_ID;
+    if (!modelId) throw new Error('BEDROCK_MODEL_ID is not set');
+    const { ConverseCommand } = await import('@aws-sdk/client-bedrock-runtime');
+    const client = await this.getClient();
+
+    // History → alternating user/assistant turns (Converse requires a leading user turn).
+    const messages: ConverseMessage[] = [];
+    const push = (role: 'user' | 'assistant', text: string) => {
+      const last = messages[messages.length - 1];
+      if (last && last.role === role) last.content.push({ text });
+      else messages.push({ role, content: [{ text }] });
+    };
+    if (input.history[0]?.role === 'assistant') push('user', '[SMS thread started by the clinic]');
+    for (const h of input.history) push(h.role, h.role === 'user' ? sanitizePatientText(h.text) : h.text);
+    push('user', sanitizePatientText(input.patientMessage) || '(empty message)');
+    messages[messages.length - 1].content.push({ text: `<turn_context>${JSON.stringify(input.context)}</turn_context>` });
+
+    const system = [{ text: buildSystemPrompt(input) }, { text: TURN_CONTEXT_NOTE }];
+    const toolConfig = (force: boolean) => ({
+      tools: [{
+        toolSpec: {
+          name: 'sms_turn',
+          description: 'Return the structured result of this SMS turn. Must be called exactly once per turn.',
+          inputSchema: { json: SMS_TURN_SCHEMA as unknown as Record<string, unknown> },
+        },
+      }],
+      toolChoice: force ? { tool: { name: 'sms_turn' } } : { auto: {} },
+    });
+
+    const call = (force: boolean) => client.send(new ConverseCommand({
+      modelId,
+      system,
+      messages,
+      // The command's input types are generated unions; our plain objects match them structurally.
+      toolConfig: toolConfig(force) as never,
+      inferenceConfig: { maxTokens: 4000 },
+    }), { abortSignal: AbortSignal.timeout(25_000) });
+
+    let res;
+    try {
+      res = await call(this.forceToolSupported);
+    } catch (err) {
+      const e = err as { name?: string; message?: string };
+      if (this.forceToolSupported && e.name === 'ValidationException' && /tool_?choice/i.test(e.message ?? '')) {
+        this.forceToolSupported = false;
+        res = await call(false);
+      } else {
+        throw err;
+      }
+    }
+    const blocks = res.output?.message?.content ?? [];
+    const tool = blocks.find(b => b.toolUse?.name === 'sms_turn')?.toolUse;
+    if (!tool) throw Object.assign(new Error('model did not call sms_turn'), { name: 'NoToolUse' });
+    return tool.input;
+  }
+}
+
+// ── Selection ───────────────────────────────────────────────────────────────
+
+export function aiProviderName(): 'mock' | 'bedrock' {
+  return process.env.AI_PROVIDER?.toLowerCase() === 'bedrock' ? 'bedrock' : 'mock';
+}
+
+const g = globalThis as unknown as { __relaySmsModel?: SmsAgentModel };
+
+export function getSmsAgentModel(): SmsAgentModel {
+  const want = aiProviderName();
+  if (!g.__relaySmsModel || g.__relaySmsModel.name !== want) {
+    g.__relaySmsModel = want === 'bedrock' ? new BedrockSmsAgentModel() : new MockSmsAgentModel();
+  }
+  return g.__relaySmsModel;
+}

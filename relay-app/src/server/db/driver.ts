@@ -86,10 +86,10 @@ async function createPgDb(url: string): Promise<Db> {
   };
 }
 
-async function createPgliteDb(): Promise<Db> {
+/** PGlite database. `dir` defaults to PGLITE_DIR; 'memory://' gives a throwaway in-memory DB (tests). */
+export async function createPgliteDb(dir: string = pgliteDir()): Promise<Db> {
   const { PGlite } = await import('@electric-sql/pglite');
-  const dir = pgliteDir();
-  fs.mkdirSync(dir, { recursive: true });
+  if (!dir.startsWith('memory://')) fs.mkdirSync(dir, { recursive: true });
   const pg = new PGlite(dir);
   await pg.waitReady;
 
