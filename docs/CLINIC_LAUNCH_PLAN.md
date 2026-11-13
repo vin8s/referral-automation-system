@@ -25,7 +25,7 @@ Everything left to take Relay from prototype to a live **SMS pilot** at the free
 | **How staff use it** | **Hosted website** with login, installable as a browser app | Replies and reminders need an always-on server anyway |
 | **Stack** | Amplify (hosting) · RDS Postgres (database) · Cognito (login) · Bedrock/Claude (AI) · End User Messaging (SMS) | All covered by the AWS BAA |
 | **Supabase** | **Removed from the project entirely**, including development | One platform (AWS), one BAA, no second system to maintain |
-| **Development setup** | A **local Postgres database on your Mac** with fake data (via the free Postgres.app); production uses AWS RDS | Coding doesn't wait for the AWS account. RDS is also Postgres, so switching is one setting. |
+| **Development setup** | **No install needed**: `npm run dev` uses a built-in Postgres (PGlite) with fake data and a mock login. Optional local Postgres via `DATABASE_URL`. Production uses AWS RDS + Cognito. See `docs/LOCAL_DEV_SETUP.md` | Coding doesn't wait for the AWS account. RDS is also Postgres, so switching is one setting (`DATABASE_URL`). |
 
 **Golden rule:** no real patient data goes into any service until its BAA is signed. **Fake data only** until the soft launch.
 

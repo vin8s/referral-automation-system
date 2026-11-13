@@ -1,164 +1,74 @@
-// Relay data accessor layer — Supabase backend (phase 2).
-// Every screen calls these async functions. No screen-level code changes needed.
+// Relay data accessor layer — the ONE seam between screens and the backend.
+//
+// Every screen calls these async functions. They call Relay's own server
+// (route handlers under src/app/api/*), which checks the signed-in user,
+// talks to Postgres (src/server/*) and writes the audit log. The browser never
+// touches the database and never bundles mock data.
+//
+// Function names and signatures are stable: screens should not need to change
+// when the server internals do.
 
-import { supabase } from './supabase';
-import {
-  org as _org,
-  currentUser as _currentUser,
-  analytics as _analytics,
-  dashboardCallActivity as _callActivity,
-  dashboardFunnel as _dashboardFunnel,
-  settingsDefaults as _settings,
-  referrals as _referrals,
-} from './mockData';
-
-const USE_MOCK = !process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://placeholder.supabase.co';
+import { normalizeTime, normCalDay } from './format';
 import type {
   Referral, ReferralState, Attempt, ConfirmQueueItem, UrgentAlert,
   CallLogEntry, CalendarEvent, PipelineCount, Analytics,
   Org, CurrentUser, DashboardFunnelStep, DashboardHealthSignals,
-  Priority, ReferralLogEntry, Channel, CallOutcome, PracticeSettings,
+  Priority, ReferralLogEntry, PracticeSettings, DashboardCallActivity, RawSettings,
 } from './types';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+export { normalizeTime };
 
-function fmtDuration(secs: number | null): string {
-  if (!secs) return '—';
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+// ── HTTP helper ──────────────────────────────────────────────────────────────
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
 }
 
-function parseDurationToSecs(duration: string): number {
-  if (!duration || duration === '—') return 0;
-  const mMatch = duration.match(/(\d+)m/);
-  const sMatch = duration.match(/(\d+)s/);
-  return (mMatch ? parseInt(mMatch[1]) * 60 : 0) + (sMatch ? parseInt(sMatch[1]) : 0);
-}
-
-function calcAge(dob: string): number {
-  const birth = new Date(dob);
-  const now = new Date();
-  let age = now.getFullYear() - birth.getFullYear();
-  if (
-    now.getMonth() < birth.getMonth() ||
-    (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())
-  ) age--;
-  return age;
-}
-
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method: init?.method ?? 'GET',
+    cache: 'no-store',
+    headers: init?.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
+  if (res.status === 401 && typeof window !== 'undefined') {
+    // Session expired: go back to the login screen, then return here.
+    const next = window.location.pathname + window.location.search;
+    window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, typeof data?.error === 'string' ? data.error : `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
 }
 
-function fmtDob(dob: string): string {
-  if (!dob) return '';
-  const [y, m, d] = dob.split('-');
-  return `${m}/${d}/${y}`;
+/** Mutations report { success: false } instead of throwing, as before. */
+async function mutate<T extends { success: boolean }>(path: string, method: string, body?: unknown): Promise<T> {
+  try {
+    return await api<T>(path, { method, body });
+  } catch (err) {
+    return { success: false, ...(err instanceof Error ? { errorMsg: err.message } : {}) } as unknown as T;
+  }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapReferral(row: any): Referral {
-  const patient = row.patients;
+const ref = (id: string) => `/referrals/${encodeURIComponent(id)}`;
 
-  const attempts: Attempt[] = (row.call_attempts ?? [])
-    .slice()
-    .sort((a: any, b: any) => new Date(a.attempted_at).getTime() - new Date(b.attempted_at).getTime())
-    .map((a: any, idx: number): Attempt => ({
-      n: idx + 1,
-      timestamp: fmtDate(a.attempted_at),
-      channel: a.channel as Channel,
-      outcome: a.outcome as CallOutcome,
-      duration: fmtDuration(a.duration_secs),
-      disclosurePlayed: a.disclosure_played ?? false,
-      summary: a.summary ?? '',
-      transcript: Array.isArray(a.transcript) ? a.transcript : [],
-      ...(a.slot_day ? { slotDay: a.slot_day } : {}),
-    }));
-
-  const capturedAppt = (row.appointments ?? []).find((a: any) => a.status === 'captured');
-  const confirmedAppt = (row.appointments ?? []).find((a: any) => a.status === 'confirmed');
-
-  return {
-    id: row.id,
-    patient: {
-      name: patient.name,
-      age: calcAge(patient.date_of_birth),
-      sex: patient.sex as 'M' | 'F',
-      dateOfBirth: fmtDob(patient.date_of_birth),
-      phone: patient.phone,
-      language: patient.language,
-      insurance: patient.insurance,
-    },
-    reason: row.reason ?? '',
-    referringProvider: row.referring_provider ?? '',
-    referralSource: row.referral_source ?? '',
-    referralTime: fmtDate(row.referral_time),
-    location: row.location ?? '',
-    priority: row.priority as Priority,
-    state: (row.state === 'In Progress' && attempts.length > 0
-      ? 'Attempted'
-      : row.state) as ReferralState,
-    capturedSlot: capturedAppt ? {
-      day: capturedAppt.day,
-      time: capturedAppt.time,
-      provider: capturedAppt.provider,
-      capturedAgoMin: Math.floor(
-        (Date.now() - new Date(capturedAppt.captured_at).getTime()) / 60000,
-      ),
-    } : null,
-    bookedAppointment: confirmedAppt ? {
-      day: confirmedAppt.day,
-      time: confirmedAppt.time,
-      provider: confirmedAppt.provider,
-      confirmedBy: 'Staff',
-      confirmedAt: confirmedAppt.confirmed_at ? fmtDate(confirmedAppt.confirmed_at) : '',
-      mirrorStatus: confirmedAppt.mirror_status as 'mirrored' | 'pending' | 'failed',
-    } : undefined,
-    escalation: row.escalation_reason ? {
-      reason: row.escalation_reason,
-      severity: row.escalation_severity as 'high' | 'med' | 'low',
-      raisedAt: row.escalation_raised_at ? fmtDate(row.escalation_raised_at) : '',
-      owner: null,
-    } : undefined,
-    attempts,
-    audit: (row.audit_log ?? [])
-      .slice()
-      .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      .map((e: any) => ({
-        at: fmtDate(e.created_at),
-        who: e.user_id ? 'Staff' : 'System',
-        what: e.what,
-      })),
-  };
-}
-
-const REFERRAL_SELECT = `*, patients(*), call_attempts(*), appointments(*), audit_log(*)`;
-
-// ── Org / session ─────────────────────────────────────────────────────────────
+// ── Org / session ────────────────────────────────────────────────────────────
 
 export async function getOrg(): Promise<Org> {
-  return _org;
+  return api<Org>('/org');
 }
 
+/** The signed-in staff member (name, role) plus the voiceEnabled feature flag. */
 export async function getCurrentUser(): Promise<CurrentUser> {
-  return _currentUser;
+  return api<CurrentUser>('/me');
 }
 
-// ── Time normalizer ───────────────────────────────────────────────────────────
-// Converts "2 PM" → "2:00 PM", "9 AM" → "9:00 AM", "09:00 AM" → "9:00 AM".
-// Single source of truth so booked-key format always matches ALL_SLOT_TIMES.
-export function normalizeTime(t: string): string {
-  const m = t.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
-  if (!m) return t.trim().toUpperCase();
-  const h = parseInt(m[1], 10); // strip leading zero
-  return `${h}:${m[2] ?? '00'} ${m[3].toUpperCase()}`;
-}
-
-// ── Booked slot keys ──────────────────────────────────────────────────────────
+// ── Booked slot keys ─────────────────────────────────────────────────────────
 // Returns a Set of "DDD Mon D|H:MM AM" keys for all captured + confirmed slots.
 // Used by callUtils to filter already-booked times out of the available_slots list.
 export async function getBookedSlotKeys(): Promise<Set<string>> {
@@ -167,7 +77,6 @@ export async function getBookedSlotKeys(): Promise<Set<string>> {
   for (const r of referrals) {
     for (const slot of [r.capturedSlot, r.bookedAppointment].filter(Boolean) as { day: string; time: string }[]) {
       if (slot.day && slot.time) {
-        // normCalDay converts ISO "2026-06-01" → "Mon Jun 1" to match buildUpcomingSlots key format
         const normalizedDay = normCalDay(slot.day) ?? slot.day.trim();
         keys.add(`${normalizedDay}|${normalizeTime(slot.time)}`);
       }
@@ -176,564 +85,131 @@ export async function getBookedSlotKeys(): Promise<Set<string>> {
   return keys;
 }
 
-// ── Referrals ─────────────────────────────────────────────────────────────────
+// ── Referrals ────────────────────────────────────────────────────────────────
 
 export async function getReferrals(): Promise<Referral[]> {
-  if (USE_MOCK) return _referrals.map(r =>
-    r.state === 'In Progress' && r.attempts.length > 0
-      ? { ...r, state: 'Attempted' as ReferralState }
-      : r
-  );
-  const { data, error } = await supabase
-    .from('referrals')
-    .select(REFERRAL_SELECT)
-    .order('referral_time', { ascending: false });
-  if (error || !data) return _referrals;
-  return data.map(mapReferral);
+  return api<Referral[]>('/referrals');
 }
 
+/** Opening a referral is recorded in the audit log (who viewed it, when). */
 export async function getReferralById(id: string): Promise<Referral | null> {
-  if (USE_MOCK) {
-    const r = _referrals.find(r => r.id === id) ?? null;
-    if (r && r.state === 'In Progress' && r.attempts.length > 0)
-      return { ...r, state: 'Attempted' as ReferralState };
-    return r;
+  try {
+    return await api<Referral>(ref(id));
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 404 || err.status === 400)) return null;
+    throw err;
   }
-  const { data, error } = await supabase
-    .from('referrals')
-    .select(REFERRAL_SELECT)
-    .eq('id', id)
-    .single();
-  if (error || !data) return _referrals.find(r => r.id === id) ?? null;
-  return mapReferral(data);
 }
 
 export async function getReferralsInMotion(): Promise<Referral[]> {
   return getReferrals();
 }
 
-// ── Confirm queue ─────────────────────────────────────────────────────────────
-
-const PLACEHOLDER_SLOT = { day: 'To be confirmed', time: 'TBD', provider: 'TBD', capturedAgoMin: null };
-
-function toConfirmQueueItem(r: Referral): ConfirmQueueItem {
-  const slot = r.capturedSlot ?? PLACEHOLDER_SLOT;
-  return {
-    referralId: r.id,
-    patient: r.patient.name,
-    age: r.patient.age,
-    sex: r.patient.sex,
-    reason: r.reason,
-    referringProvider: r.referringProvider,
-    language: r.patient.language,
-    insurance: r.patient.insurance,
-    slot,
-    capturedAgoMin: slot.capturedAgoMin,
-    priority: r.priority,
-    summary: r.attempts[r.attempts.length - 1]?.summary ?? '',
-    transcript: r.attempts[r.attempts.length - 1]?.transcript ?? [],
-  };
-}
+// ── Confirm queue ────────────────────────────────────────────────────────────
 
 export async function getConfirmQueue(): Promise<ConfirmQueueItem[]> {
-  if (USE_MOCK) {
-    return _referrals
-      .filter(r => r.state === 'Pending Confirmation')
-      .map(toConfirmQueueItem);
-  }
-  const { data, error } = await supabase
-    .from('referrals')
-    .select(REFERRAL_SELECT)
-    .eq('state', 'Pending Confirmation')
-    .order('referral_time', { ascending: true });
-  if (error || !data) return [];
-  return data.map(mapReferral).map(toConfirmQueueItem);
+  return api<ConfirmQueueItem[]>('/confirm-queue');
 }
 
+/** MA confirms an AI-captured slot they have booked in the practice system. */
 export async function confirmSlot(referralId: string): Promise<{ success: boolean }> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref && ref.capturedSlot) {
-      const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-      ref.bookedAppointment = {
-        day: ref.capturedSlot.day,
-        time: ref.capturedSlot.time,
-        provider: ref.capturedSlot.provider,
-        confirmedBy: 'Priya Anand',
-        confirmedAt: now,
-        mirrorStatus: 'mirrored',
-      };
-      ref.capturedSlot = null;
-      ref.state = 'Booked';
-    }
-    return { success: true };
-  }
-  const now = new Date().toISOString();
-  const [{ error: e1 }, { error: e2 }] = await Promise.all([
-    supabase
-      .from('appointments')
-      .update({ status: 'confirmed', confirmed_at: now, mirror_status: 'mirrored' })
-      .eq('referral_id', referralId)
-      .eq('status', 'captured'),
-    supabase
-      .from('referrals')
-      .update({ state: 'Booked', updated_at: now })
-      .eq('id', referralId),
-  ]);
-  await supabase.from('audit_log').insert({ referral_id: referralId, what: 'Slot confirmed in practice system' });
-  return { success: !e1 && !e2 };
+  return mutate(`${ref(referralId)}/confirm`, 'POST');
 }
 
 export async function rejectSlot(referralId: string): Promise<{ success: boolean }> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref) {
-      ref.capturedSlot = null;
-      ref.state = 'In Progress';
-    }
-    return { success: true };
-  }
-  const now = new Date().toISOString();
-  const [{ error: e1 }, { error: e2 }] = await Promise.all([
-    supabase
-      .from('appointments')
-      .update({ status: 'expired' })
-      .eq('referral_id', referralId)
-      .eq('status', 'captured'),
-    supabase
-      .from('referrals')
-      .update({ state: 'In Progress', updated_at: now })
-      .eq('id', referralId),
-  ]);
-  await supabase.from('audit_log').insert({ referral_id: referralId, what: 'Slot rejected — re-entering outreach' });
-  return { success: !e1 && !e2 };
+  return mutate(`${ref(referralId)}/reject`, 'POST');
 }
 
-// ── Urgent alerts ─────────────────────────────────────────────────────────────
+// ── Urgent alerts ────────────────────────────────────────────────────────────
 
 export async function getUrgentAlerts(): Promise<UrgentAlert[]> {
-  if (USE_MOCK) {
-    return _referrals
-      .filter(r => r.state === 'Escalated' && r.escalation)
-      .map(r => ({
-        referralId: r.id,
-        patient: r.patient.name,
-        reason: r.escalation!.reason,
-        severity: r.escalation!.severity,
-        raisedAt: r.escalation!.raisedAt,
-        owner: r.escalation!.owner,
-        transcriptExcerpt: r.attempts[r.attempts.length - 1]?.transcript?.slice(-2) ?? [],
-      }));
-  }
-  const { data, error } = await supabase
-    .from('referrals')
-    .select(REFERRAL_SELECT)
-    .eq('state', 'Escalated');
-  if (error || !data) return [];
-  return data
-    .map(mapReferral)
-    .filter(r => r.escalation)
-    .map(r => ({
-      referralId: r.id,
-      patient: r.patient.name,
-      reason: r.escalation!.reason,
-      severity: r.escalation!.severity,
-      raisedAt: r.escalation!.raisedAt,
-      owner: r.escalation!.owner,
-      transcriptExcerpt: r.attempts[r.attempts.length - 1]?.transcript?.slice(-2) ?? [],
-    }));
+  return api<UrgentAlert[]>('/alerts');
 }
 
-export async function claimAlert(referralId: string, ownerName: string): Promise<{ success: boolean }> {
-  const { error } = await supabase
-    .from('audit_log')
-    .insert({ referral_id: referralId, what: `Alert claimed by ${ownerName}` });
-  return { success: !error };
+/** The server records the signed-in user as owner; ownerName is kept for API compatibility. */
+export async function claimAlert(referralId: string, _ownerName?: string): Promise<{ success: boolean }> {
+  return mutate(`${ref(referralId)}/claim`, 'POST');
 }
 
-// ── Call log ──────────────────────────────────────────────────────────────────
+// ── Call log ─────────────────────────────────────────────────────────────────
 
 export async function getCallLog(): Promise<CallLogEntry[]> {
-  if (USE_MOCK) {
-    const entries: CallLogEntry[] = [];
-    for (const r of _referrals) {
-      for (const a of r.attempts) {
-        entries.push({
-          referralId: r.id,
-          patient: r.patient.name,
-          language: r.patient.language,
-          timestamp: a.timestamp,
-          attempt: a.n,
-          channel: a.channel,
-          outcome: a.outcome,
-          duration: a.duration,
-          summary: a.summary,
-          hasTranscript: a.transcript.length > 0,
-          escalated: a.outcome === 'Escalated',
-          disclosurePlayed: a.disclosurePlayed,
-          referralState: r.state,
-        });
-      }
-    }
-    return entries.reverse();
-  }
-  const { data, error } = await supabase
-    .from('call_attempts')
-    .select('*, referrals(id, state, patients(name, language))')
-    .order('attempted_at', { ascending: false });
-  if (error || !data) return [];
-
-  // Compute per-referral attempt numbers
-  const byReferral: Record<string, string[]> = {};
-  for (const a of [...data].sort((x: any, y: any) =>
-    new Date(x.attempted_at).getTime() - new Date(y.attempted_at).getTime()
-  )) {
-    (byReferral[a.referral_id] ??= []).push(a.id);
-  }
-
-  return data.map((a: any) => ({
-    referralId: a.referral_id,
-    patient: a.referrals?.patients?.name ?? '—',
-    language: a.referrals?.patients?.language ?? '',
-    timestamp: fmtDate(a.attempted_at),
-    attempt: (byReferral[a.referral_id] ?? []).indexOf(a.id) + 1,
-    channel: a.channel as Channel,
-    outcome: a.outcome as CallOutcome,
-    duration: fmtDuration(a.duration_secs),
-    summary: a.summary ?? '',
-    hasTranscript: Array.isArray(a.transcript) && a.transcript.length > 0,
-    escalated: a.outcome === 'Escalated',
-    disclosurePlayed: a.disclosure_played ?? false,
-    referralState: (a.referrals?.state ?? 'Queued') as ReferralState,
-  }));
+  return api<CallLogEntry[]>('/call-log');
 }
 
-// ── Calendar ──────────────────────────────────────────────────────────────────
-
-// ── Calendar day normalizer ───────────────────────────────────────────────────
-// Converts any date string to "Mon Jun 8" format expected by parseEventDate.
-// Returns null if the string cannot be parsed (entry is dropped from calendar).
-
-const _MONTH_A = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const _DOW_A   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const _MONTH_MAP: Record<string, number> = {
-  january:0,february:1,march:2,april:3,may:4,june:5,
-  july:6,august:7,september:8,october:9,november:10,december:11,
-  jan:0,feb:1,mar:2,apr:3,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,
-};
-
-function normCalDay(raw: string): string | null {
-  if (!raw || raw === 'To be confirmed') return null;
-  // Already "Mon Jun 8"
-  if (/^[A-Za-z]{3} [A-Za-z]{3} \d{1,2}$/.test(raw)) return raw;
-  // Try native Date parse ("June 8, 2026", "2026-06-08", etc.)
-  const native = new Date(raw);
-  if (!isNaN(native.getTime())) {
-    return `${_DOW_A[native.getDay()]} ${_MONTH_A[native.getMonth()]} ${native.getDate()}`;
-  }
-  // Natural-language fallback: "Monday, June 8th" / "June 8" / "Jun 8th"
-  const lower = raw.toLowerCase();
-  let month = -1;
-  for (const [name, idx] of Object.entries(_MONTH_MAP)) {
-    if (lower.includes(name)) { month = idx; break; }
-  }
-  const dayMatch = raw.match(/\b(\d{1,2})(st|nd|rd|th)?\b/);
-  const dayNum = dayMatch ? parseInt(dayMatch[1], 10) : NaN;
-  if (month !== -1 && !isNaN(dayNum)) {
-    const d = new Date(2026, month, dayNum);
-    if (!isNaN(d.getTime())) return `${_DOW_A[d.getDay()]} ${_MONTH_A[d.getMonth()]} ${d.getDate()}`;
-  }
-  return null;
-}
+// ── Calendar (read-only mirror + edits to confirmed appointments) ────────────
 
 export async function getCalendarEvents(): Promise<CalendarEvent[]> {
-  if (USE_MOCK) {
-    const events: CalendarEvent[] = [];
-    for (const r of _referrals) {
-      if (r.bookedAppointment) {
-        const day = normCalDay(r.bookedAppointment.day);
-        if (day) events.push({
-          referralId: r.id,
-          patient: r.patient.name,
-          day,
-          time: r.bookedAppointment.time,
-          provider: r.bookedAppointment.provider,
-          location: r.location,
-          reason: r.reason,
-          state: r.state,
-          mirrorStatus: r.bookedAppointment.mirrorStatus,
-          isShadow: false,
-        });
-      }
-      if (r.capturedSlot) {
-        const day = normCalDay(r.capturedSlot.day);
-        if (day) events.push({
-          referralId: r.id,
-          patient: r.patient.name,
-          day,
-          time: r.capturedSlot.time,
-          provider: r.capturedSlot.provider,
-          location: r.location,
-          reason: r.reason,
-          state: r.state,
-          mirrorStatus: 'pending',
-          isShadow: true,
-        });
-      }
-    }
-    return events;
-  }
-  const { data, error } = await supabase
-    .from('appointments')
-    .select('*, referrals(id, location, reason, state, patients(name))')
-    .in('status', ['confirmed', 'captured'])
-    .order('day', { ascending: true });
-  if (error || !data) return [];
-  return data
-    .map((a: any) => {
-      const day = normCalDay(a.day);
-      if (!day) return null;
-      return {
-        referralId: a.referral_id,
-        patient: a.referrals?.patients?.name ?? '—',
-        day,
-        time: a.time,
-        provider: a.provider,
-        location: a.referrals?.location ?? '',
-        reason: a.referrals?.reason ?? '',
-        state: a.referrals?.state as ReferralState,
-        mirrorStatus: a.mirror_status as 'mirrored' | 'pending' | 'failed',
-        isShadow: a.status === 'captured',
-      };
-    })
-    .filter((e): e is CalendarEvent => e !== null);
+  return api<CalendarEvent[]>('/calendar');
 }
 
 export async function updateCalendarEvent(
   referralId: string,
   updates: { day?: string; time?: string; provider?: string; location?: string },
 ): Promise<{ success: boolean }> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref?.bookedAppointment) {
-      if (updates.day) ref.bookedAppointment.day = normCalDay(updates.day) ?? updates.day;
-      if (updates.time) ref.bookedAppointment.time = updates.time;
-      if (updates.provider) ref.bookedAppointment.provider = updates.provider;
-      if (updates.location) ref.location = updates.location;
-    }
-    return { success: true };
-  }
-  const apptUpdates: Record<string, string> = {};
-  if (updates.day) apptUpdates.day = updates.day;
-  if (updates.time) apptUpdates.time = updates.time;
-  if (updates.provider) apptUpdates.provider = updates.provider;
-  const { error } = await supabase
-    .from('appointments')
-    .update(apptUpdates)
-    .eq('referral_id', referralId)
-    .eq('status', 'confirmed');
-  if (updates.location) {
-    await supabase.from('referrals').update({ location: updates.location }).eq('id', referralId);
-  }
-  await supabase.from('audit_log').insert({ referral_id: referralId, what: 'Appointment details edited' });
-  return { success: !error };
+  return mutate(`${ref(referralId)}/appointment`, 'PATCH', { updates });
 }
 
-export async function deleteCalendarEvent(
-  referralId: string,
-): Promise<{ success: boolean }> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref) {
-      ref.bookedAppointment = undefined;
-      ref.state = 'Pending Confirmation';
-    }
-    return { success: true };
-  }
-  const now = new Date().toISOString();
-  const [{ error: e1 }, { error: e2 }] = await Promise.all([
-    supabase
-      .from('appointments')
-      .update({ status: 'cancelled' })
-      .eq('referral_id', referralId)
-      .eq('status', 'confirmed'),
-    supabase
-      .from('referrals')
-      .update({ state: 'Pending Confirmation', updated_at: now })
-      .eq('id', referralId),
-  ]);
-  await supabase.from('audit_log').insert({ referral_id: referralId, what: 'Appointment cancelled — returned to Pending Confirmation' });
-  return { success: !e1 && !e2 };
+export async function deleteCalendarEvent(referralId: string): Promise<{ success: boolean }> {
+  return mutate(`${ref(referralId)}/appointment`, 'DELETE');
 }
 
-// ── Pipeline / analytics ──────────────────────────────────────────────────────
+// ── Pipeline / analytics ─────────────────────────────────────────────────────
 
 export async function getPipeline(): Promise<PipelineCount[]> {
-  const states: ReferralState[] = ['Queued', 'In Progress', 'Attempted', 'Pending Confirmation', 'Booked', 'Escalated'];
-  if (USE_MOCK) {
-    return states.map(s => ({ state: s, count: _referrals.filter(r => r.state === s).length }));
-  }
-  const { data, error } = await supabase.from('referrals').select('state');
-  if (error || !data) return states.map(s => ({ state: s, count: 0 }));
-  return states.map(s => ({
-    state: s,
-    count: data.filter((r: any) => r.state === s).length,
-  }));
+  return api<PipelineCount[]>('/pipeline');
 }
 
 export async function getAnalytics(): Promise<Analytics> {
-  return _analytics;
+  return api<Analytics>('/analytics');
 }
 
-export async function getDashboardCallActivity() {
-  return _callActivity;
+export async function getDashboardCallActivity(): Promise<DashboardCallActivity> {
+  return api<DashboardCallActivity>('/dashboard/call-activity');
 }
 
-// ── Settings ──────────────────────────────────────────────────────────────────
-
-const SETTINGS_KEY = 'relay_practice_settings';
-
-const VALID_CALL_ORDERS = ['chronological', 'urgent_first', 'all', 'fewest_attempts'] as const;
-
-const _defaultSettings: PracticeSettings = {
-  cadence: { intervalMinutes: 5, maxCallsPerSession: 10, callOrder: 'chronological' },
-};
-
-function loadPersistedSettings(): PracticeSettings {
-  if (typeof window === 'undefined') return _defaultSettings;
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return _defaultSettings;
-    const parsed = JSON.parse(raw) as Record<string, unknown> & { cadence?: Record<string, unknown> };
-    // Migrate legacy urgentFirst boolean → callOrder string
-    const savedOrder = parsed.cadence?.callOrder as string | undefined;
-    const legacyUrgentFirst = parsed.cadence?.urgentFirst;
-    const callOrder = VALID_CALL_ORDERS.includes(savedOrder as typeof VALID_CALL_ORDERS[number])
-      ? (savedOrder as typeof VALID_CALL_ORDERS[number])
-      : legacyUrgentFirst === true
-      ? 'urgent_first'
-      : _defaultSettings.cadence.callOrder;
-    return {
-      cadence: {
-        intervalMinutes: (parsed.cadence?.intervalMinutes as number) ?? _defaultSettings.cadence.intervalMinutes,
-        maxCallsPerSession: (parsed.cadence?.maxCallsPerSession as number) ?? _defaultSettings.cadence.maxCallsPerSession,
-        callOrder,
-      },
-    };
-  } catch {
-    return _defaultSettings;
-  }
-}
+// ── Settings ─────────────────────────────────────────────────────────────────
 
 export async function getSettings(): Promise<PracticeSettings> {
-  if (USE_MOCK) return loadPersistedSettings();
-  // Phase 2: SELECT from practice_settings WHERE id = 'default'
-  return loadPersistedSettings();
+  return api<PracticeSettings>('/settings');
 }
 
+/** Admin only. Throws ApiError (status 403) for non-admins. */
 export async function saveSettings(s: PracticeSettings): Promise<void> {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-  }
-  if (USE_MOCK) return;
-  // Phase 2: UPSERT into practice_settings
+  await api<PracticeSettings>('/settings', { method: 'PUT', body: s });
 }
 
-export async function getRawSettings() {
-  return _settings;
+export async function getRawSettings(): Promise<RawSettings> {
+  return api<RawSettings>('/settings/defaults');
 }
 
-// ── Sidebar counts ────────────────────────────────────────────────────────────
+// ── Sidebar counts ───────────────────────────────────────────────────────────
 
 export async function getSidebarCounts(): Promise<{ urgentAlerts: number; confirmQueue: number; referrals: number }> {
-  if (USE_MOCK) {
-    return {
-      urgentAlerts: _referrals.filter(r => r.state === 'Escalated').length,
-      confirmQueue: _referrals.filter(r => r.state === 'Pending Confirmation').length,
-      referrals: _referrals.filter(r => r.state !== 'Booked').length,
-    };
-  }
-  const { data, error } = await supabase.from('referrals').select('state');
-  if (error || !data) return { urgentAlerts: 0, confirmQueue: 0, referrals: 0 };
-  return {
-    urgentAlerts: data.filter((r: any) => r.state === 'Escalated').length,
-    confirmQueue: data.filter((r: any) => r.state === 'Pending Confirmation').length,
-    referrals: data.filter((r: any) => r.state !== 'Booked').length,
-  };
+  return api('/sidebar-counts');
 }
 
-// ── Mutations ─────────────────────────────────────────────────────────────────
+// ── Mutations ────────────────────────────────────────────────────────────────
 
 export async function updateReferralState(
   referralId: string,
   newState: ReferralState,
 ): Promise<{ success: boolean }> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref) ref.state = newState;
-    return { success: true };
-  }
-  const { error } = await supabase
-    .from('referrals')
-    .update({ state: newState, updated_at: new Date().toISOString() })
-    .eq('id', referralId);
-  await supabase.from('audit_log').insert({
-    referral_id: referralId,
-    what: `State updated to ${newState}`,
-  });
-  return { success: !error };
+  return mutate(`${ref(referralId)}/state`, 'PUT', { state: newState });
 }
 
 export async function createCapturedSlot(
   referralId: string,
   slot: { day: string; time: string; provider: string },
 ): Promise<{ success: boolean }> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref) ref.capturedSlot = { ...slot, capturedAgoMin: 0 };
-    return { success: true };
-  }
-  const { error } = await supabase.from('appointments').insert({
-    referral_id: referralId,
-    status: 'captured',
-    day: slot.day,
-    time: slot.time,
-    provider: slot.provider,
-    captured_at: new Date().toISOString(),
-    mirror_status: 'pending',
-  });
-  return { success: !error };
+  return mutate(`${ref(referralId)}/captured-slot`, 'POST', { slot });
 }
 
 export async function addCallAttempt(
   referralId: string,
   attempt: Omit<Attempt, 'n'>,
 ): Promise<{ success: boolean; errorMsg?: string }> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref) {
-      ref.attempts = [...ref.attempts, { ...attempt, n: ref.attempts.length + 1 }];
-    }
-    return { success: true };
-  }
-  const { error } = await supabase.from('call_attempts').insert({
-    referral_id: referralId,
-    channel: attempt.channel,
-    outcome: attempt.outcome,
-    duration_secs: parseDurationToSecs(attempt.duration),
-    disclosure_played: attempt.disclosurePlayed,
-    summary: attempt.summary,
-    transcript: attempt.transcript,
-  });
-  if (error) {
-    console.error('[addCallAttempt] Supabase insert error:', error);
-    return { success: false, errorMsg: error.message };
-  }
-  await supabase.from('audit_log').insert({
-    referral_id: referralId,
-    what: `${attempt.channel === 'voice' ? 'Voice' : 'SMS'} call: ${attempt.outcome} · ${attempt.duration}`,
-  });
-  return { success: true };
+  return mutate(`${ref(referralId)}/attempts`, 'POST', { attempt });
 }
 
 // Updates the most recently inserted call attempt for a referral with a late-arriving transcript.
@@ -741,24 +217,7 @@ export async function patchLatestTranscript(
   referralId: string,
   turns: { who: 'ai' | 'patient'; text: string }[],
 ): Promise<void> {
-  if (USE_MOCK) {
-    const ref = _referrals.find(r => r.id === referralId);
-    if (ref && ref.attempts.length > 0) {
-      const last = ref.attempts[ref.attempts.length - 1];
-      if (!last.transcript.length) last.transcript = turns;
-    }
-    return;
-  }
-  const { data } = await supabase
-    .from('call_attempts')
-    .select('id')
-    .eq('referral_id', referralId)
-    .order('attempted_at', { ascending: false })
-    .limit(1)
-    .single();
-  if (data?.id) {
-    await supabase.from('call_attempts').update({ transcript: turns }).eq('id', data.id);
-  }
+  await mutate(`${ref(referralId)}/attempts/latest`, 'PATCH', { turns });
 }
 
 export async function updateReferral(
@@ -775,53 +234,10 @@ export async function updateReferral(
   },
   comment?: string,
 ): Promise<{ success: boolean }> {
-  const { data: ref } = await supabase
-    .from('referrals')
-    .select('patient_id')
-    .eq('id', referralId)
-    .single();
-  if (!ref) return { success: false };
-
-  const patientUpdates: Record<string, string> = {};
-  if (draft.patientName) patientUpdates.name = draft.patientName;
-  if (draft.phone)       patientUpdates.phone = draft.phone;
-  if (draft.language)    patientUpdates.language = draft.language;
-  if (draft.insurance)   patientUpdates.insurance = draft.insurance;
-  if (draft.dateOfBirth) {
-    const [m, d, y] = draft.dateOfBirth.split('/');
-    patientUpdates.date_of_birth = `${y}-${m}-${d}`;
-  }
-
-  const referralUpdates: Record<string, string> = { updated_at: new Date().toISOString() };
-  if (draft.reason)            referralUpdates.reason = draft.reason;
-  if (draft.referringProvider) referralUpdates.referring_provider = draft.referringProvider;
-  if (draft.priority)          referralUpdates.priority = draft.priority;
-
-  const auditLines: string[] = [];
-  if (draft.patientName)       auditLines.push(`Name → ${draft.patientName}`);
-  if (draft.phone)             auditLines.push(`Phone → ${draft.phone}`);
-  if (draft.language)          auditLines.push(`Language → ${draft.language}`);
-  if (draft.insurance)         auditLines.push(`Insurance → ${draft.insurance}`);
-  if (draft.dateOfBirth)       auditLines.push(`DOB → ${draft.dateOfBirth}`);
-  if (draft.reason)            auditLines.push(`Reason → ${draft.reason}`);
-  if (draft.referringProvider) auditLines.push(`Provider → ${draft.referringProvider}`);
-  if (draft.priority)          auditLines.push(`Priority → ${draft.priority}`);
-  if (comment?.trim())         auditLines.push(`Comment: ${comment.trim()}`);
-
-  await supabase.from('referrals').update(referralUpdates).eq('id', referralId);
-  if (Object.keys(patientUpdates).length > 0) {
-    await supabase.from('patients').update(patientUpdates).eq('id', ref.patient_id);
-  }
-  if (auditLines.length > 0) {
-    await supabase.from('audit_log').insert({
-      referral_id: referralId,
-      what: `Manual edit — ${auditLines.join(' · ')}`,
-    });
-  }
-  return { success: true };
+  return mutate(ref(referralId), 'PATCH', { draft, comment });
 }
 
-// ── Ingest ────────────────────────────────────────────────────────────────────
+// ── Ingest ───────────────────────────────────────────────────────────────────
 
 export interface IngestReferralInput {
   patientName: string;
@@ -839,186 +255,25 @@ export interface IngestReferralInput {
 export async function ingestReferrals(
   rows: IngestReferralInput[],
 ): Promise<{ success: boolean; importedCount: number }> {
-  if (USE_MOCK) {
-    const maxId = _referrals.reduce((max, r) => {
-      const n = parseInt(r.id.replace('REF-', ''), 10);
-      return isNaN(n) ? max : Math.max(max, n);
-    }, 1042);
-
-    const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    rows.forEach((row, i) => {
-      const id = `REF-${maxId + i + 1}`;
-      const dobIso = row.dateOfBirth
-        ? (() => { const [m, d, y] = row.dateOfBirth!.split('/'); return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`; })()
-        : '';
-      _referrals.unshift({
-        id,
-        patient: {
-          name: row.patientName,
-          age: dobIso ? calcAge(dobIso) : 0,
-          sex: (row.sex === 'M' || row.sex === 'F') ? row.sex : 'M',
-          dateOfBirth: row.dateOfBirth ?? '',
-          phone: row.phone,
-          language: row.language ?? 'English',
-          insurance: row.insurance ?? '',
-        },
-        reason: row.reason ?? '',
-        referringProvider: row.referringProvider ?? '',
-        referralSource: 'Uploaded batch',
-        referralTime: now,
-        location: row.location ?? '',
-        priority: row.priority ?? 'normal',
-        state: 'Queued',
-        capturedSlot: null,
-        attempts: [],
-        audit: [{ at: now, who: 'Staff', what: 'Ingested via spreadsheet upload' }],
-      });
-    });
-    return { success: true, importedCount: rows.length };
+  try {
+    return await api('/referrals', { method: 'POST', body: { rows } });
+  } catch {
+    return { success: false, importedCount: 0 };
   }
-
-  const now = new Date().toISOString();
-  let importedCount = 0;
-
-  // Determine the starting ID by reading the current max numeric suffix
-  const { data: existing } = await supabase.from('referrals').select('id');
-  const maxId = (existing ?? []).reduce((max, r: { id: string }) => {
-    const n = parseInt(r.id.replace('REF-', ''), 10);
-    return isNaN(n) ? max : Math.max(max, n);
-  }, 1042);
-
-  for (const row of rows) {
-    const referralId = `REF-${maxId + importedCount + 1}`;
-    const dobIso = row.dateOfBirth
-      ? (() => { const [m, d, y] = row.dateOfBirth!.split('/'); return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`; })()
-      : null;
-
-    const { data: patient, error: pe } = await supabase
-      .from('patients')
-      .insert({
-        name: row.patientName,
-        phone: row.phone,
-        language: row.language ?? 'English',
-        insurance: row.insurance ?? '',
-        sex: row.sex || 'M',
-        date_of_birth: dobIso,
-      })
-      .select('id')
-      .single();
-
-    if (pe || !patient) {
-      console.error('[ingestReferrals] patient insert error:', pe?.message);
-      continue;
-    }
-
-    const { error: re } = await supabase.from('referrals').insert({
-      id: referralId,
-      patient_id: patient.id,
-      reason: row.reason ?? '',
-      referring_provider: row.referringProvider ?? '',
-      referral_source: 'Uploaded batch',
-      referral_time: now,
-      location: row.location || 'Mission Bay',
-      priority: row.priority ?? 'normal',
-      state: 'Queued',
-      updated_at: now,
-    });
-
-    if (re) {
-      console.error('[ingestReferrals] referral insert error:', re.message);
-      continue;
-    }
-
-    await supabase.from('audit_log').insert({
-      referral_id: referralId,
-      what: 'Ingested via spreadsheet upload',
-    });
-
-    importedCount++;
-  }
-  return { success: true, importedCount };
 }
 
-// ── Referral log ──────────────────────────────────────────────────────────────
+// ── Referral log ─────────────────────────────────────────────────────────────
 
 export async function getReferralLog(): Promise<ReferralLogEntry[]> {
-  const [attemptsRes, auditRes] = await Promise.all([
-    supabase
-      .from('call_attempts')
-      .select('*, referrals(id, state, patients(name))')
-      .order('attempted_at', { ascending: false }),
-    supabase
-      .from('audit_log')
-      .select('*, referrals(id, state, patients(name))')
-      .order('created_at', { ascending: false }),
-  ]);
-
-  // Compute per-referral attempt numbers from attempts ordered ascending
-  const allAttempts = attemptsRes.data ?? [];
-  const byReferral: Record<string, string[]> = {};
-  for (const a of [...allAttempts].sort((x: any, y: any) =>
-    new Date(x.attempted_at).getTime() - new Date(y.attempted_at).getTime()
-  )) {
-    (byReferral[a.referral_id] ??= []).push(a.id);
-  }
-
-  const entries: ReferralLogEntry[] = [];
-
-  for (const a of allAttempts) {
-    const rawState = (a as any).referrals?.state as ReferralState | undefined;
-    // ai_call entries have at least one attempt — apply the same Attempted derivation
-    const referralState: ReferralState = rawState === 'In Progress' ? 'Attempted' : (rawState ?? 'Queued');
-    entries.push({
-      referralId: a.referral_id,
-      patient: (a as any).referrals?.patients?.name ?? '—',
-      at: fmtDate(a.attempted_at),
-      type: 'ai_call',
-      who: 'AI agent',
-      what: `${a.channel === 'voice' ? 'Voice' : 'SMS'} · ${a.outcome}`,
-      referralState,
-      detail: a.summary ?? undefined,
-      channel: a.channel as Channel,
-      outcome: a.outcome,
-      duration: fmtDuration(a.duration_secs),
-      disclosurePlayed: a.disclosure_played ?? false,
-      escalated: a.outcome === 'Escalated',
-      hasTranscript: Array.isArray(a.transcript) && a.transcript.length > 0,
-      attempt: (byReferral[a.referral_id] ?? []).indexOf(a.id) + 1,
-    });
-  }
-
-  for (const e of auditRes.data ?? []) {
-    const rawState = (e as any).referrals?.state as ReferralState | undefined;
-    entries.push({
-      referralId: e.referral_id,
-      patient: (e as any).referrals?.patients?.name ?? '—',
-      at: fmtDate(e.created_at),
-      type: e.what.startsWith('State') ? 'system' : 'manual_update',
-      who: e.user_id ? 'Staff' : 'System',
-      what: e.what,
-      referralState: rawState,
-    });
-  }
-
-  return entries.sort((a, b) => (a.at < b.at ? 1 : -1));
+  return api<ReferralLogEntry[]>('/referral-log');
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
+// ── Dashboard ────────────────────────────────────────────────────────────────
 
 export async function getDashboardFunnel(): Promise<DashboardFunnelStep[]> {
-  return [..._dashboardFunnel];
+  return api<DashboardFunnelStep[]>('/dashboard/funnel');
 }
 
 export async function getDashboardHealthSignals(): Promise<DashboardHealthSignals> {
-  const { data } = await supabase.from('referrals').select('state');
-  const escalated = (data ?? []).filter((r: any) => r.state === 'Escalated').length;
-  return {
-    status: 'normal' as const,
-    disclosureRatePct: _analytics.compliance.aiDisclosureRate,
-    quietHoursAdherencePct: _analytics.compliance.quietHourAdherence,
-    avgTimeToFirstAttemptMin: _callActivity.avgTimeToFirstAttemptMin,
-    escalationsTriggered: escalated,
-    shadowCalendarFidelityPct: _analytics.shadowFidelity.currentPct,
-    optOutsHonored: _analytics.compliance.optOutsHonored,
-  };
+  return api<DashboardHealthSignals>('/dashboard/health');
 }

@@ -201,6 +201,27 @@ export interface CurrentUser {
   role: string;
   initials: string;
   today: string;
+  /** Session user id (Cognito sub or mock id). */
+  id?: string;
+  /** Machine role used for permissions. */
+  roleKey?: 'ma' | 'admin';
+  /** Server feature flag: outbound voice calls allowed (VOICE_ENABLED). */
+  voiceEnabled?: boolean;
+}
+
+export interface DashboardCallActivity {
+  window: string;
+  avgTimeToFirstAttemptMin: number;
+  metrics: DashboardCallMetric[];
+}
+
+/** Read-only practice configuration shown on the Settings screen. */
+export interface RawSettings {
+  cadence: { attempts: string[]; channelEscalation: string; stopRules: string[] };
+  quietHours: { start: string; end: string; timezone: string };
+  aiDisclosure: { locked: boolean; text: string };
+  escalationTriggers: string[];
+  practiceProfile: { specialty: string; providers: string[]; locations: string[]; languages: string[] };
 }
 
 export interface DashboardCallMetric {

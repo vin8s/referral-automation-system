@@ -7,7 +7,9 @@ import { Icon } from '@/components/shared/Icon';
 import { StatePill } from '@/components/shared/StatePill';
 import { CommandPalette } from '@/components/shared/CommandPalette';
 import { useCallQueue } from '@/contexts/CallQueueContext';
+import { useSession } from '@/contexts/SessionContext';
 import { getReferrals } from '@/lib/data';
+import { ROLE_LABEL } from '@/lib/auth-types';
 import type { Referral } from '@/lib/types';
 
 // ── Notification types ────────────────────────────────────────────────────────
@@ -414,6 +416,74 @@ function TopBarSearch({ onOpenPalette }: { onOpenPalette: () => void }) {
   );
 }
 
+// ── User menu (signed-in staff member + sign out) ─────────────────────────────
+
+function UserMenu() {
+  const { user } = useSession();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const initials = user.name.split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase();
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function handleKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false); }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="tb-avatar"
+        title={user.name}
+        aria-label="Account"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+      >
+        {initials}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 700, width: 240,
+            background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)',
+            borderRadius: 'var(--relay-radius)', boxShadow: 'var(--relay-shadow-pop)', overflow: 'hidden',
+          }}
+        >
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--relay-hairline)' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--relay-ink)' }}>{user.name}</div>
+            {user.email && (
+              <div style={{ fontSize: 12, color: 'var(--relay-ink-3)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {user.email}
+              </div>
+            )}
+            <span style={{
+              display: 'inline-block', marginTop: 8, fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99,
+              background: 'var(--relay-accent-50)', color: 'var(--relay-accent-800)', border: '1px solid var(--relay-accent-200)',
+            }}>
+              {ROLE_LABEL[user.role]}
+            </span>
+          </div>
+          <form action="/api/auth/logout" method="post" style={{ padding: 6 }}>
+            <button type="submit" role="menuitem" className="nav-item">
+              <Icon name="logout" size={14} /> Sign out
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── TopBar ────────────────────────────────────────────────────────────────────
 
 function TopBarInner() {
@@ -500,9 +570,7 @@ function TopBarInner() {
           )}
         </div>
 
-        <button className="tb-avatar" title="Saajan P." aria-label="Account">
-          S
-        </button>
+        <UserMenu />
       </div>
     </div>
   );
