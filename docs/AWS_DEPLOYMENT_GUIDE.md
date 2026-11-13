@@ -86,8 +86,16 @@ Use an email address the **owner** controls long-term (e.g. `aws-admin@clinic.or
    [AWS Free Tier FAQ](https://aws.amazon.com/free/faqs/))
 4. Contact type: **Business** (use the clinic's legal name and address). Add a payment card.
 5. Identity check by phone/SMS, then choose **Basic support (free)**.
+6. **Turn on advanced AWS features (required for Relay).** AWS's simplified "new AWS experience" sign-up
+   blocks things Relay needs: accepting the **HIPAA BAA** in AWS Artifact, **IAM Identity Center**,
+   **cross-Region** features (which newer Claude models in Bedrock use), and — on the Free plan — **End User
+   Messaging SMS**. If your account was created that way, use **Activate advanced AWS features**
+   ([AWS docs](https://docs.aws.amazon.com/accounts/latest/reference/activate-advanced-features.html)), and
+   upgrade to the **Paid plan** first so your credits carry over. AWS recommends the advanced sign-up for
+   regulated workloads anyway ([supported services list](https://docs.aws.amazon.com/accounts/latest/reference/supported-services-sign-up-new.html)).
 
-**Success:** you can sign in to <https://console.aws.amazon.com> as the **root user**.
+**Success:** you can sign in to <https://console.aws.amazon.com> as the **root user**, and the account is on the
+Paid plan with advanced features active.
 
 ### Step 3. Protect the root user with MFA
 **MFA** = multi-factor authentication: a 6-digit code from an app on your phone in addition to the password.
