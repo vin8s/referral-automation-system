@@ -6,6 +6,7 @@ import { PageHead } from '@/components/layout/PageHead';
 import { Avatar } from '@/components/shared/Avatar';
 import { Icon } from '@/components/shared/Icon';
 import { TranscriptPanel } from '@/components/shared/TranscriptPanel';
+import { SmsThread } from '@/components/shared/SmsThread';
 import { getConfirmQueue, confirmSlot, rejectSlot } from '@/lib/data';
 import type { ConfirmQueueItem } from '@/lib/types';
 
@@ -111,6 +112,7 @@ function ConfirmCard({ item, onConfirm, onReject }: {
 }) {
   const [showTranscript, setShowTranscript] = useState(false);
   const [busy, setBusy] = useState(false);
+  const isSms = item.channel === 'sms';
 
   async function handleConfirm() {
     setBusy(true);
@@ -146,6 +148,9 @@ function ConfirmCard({ item, onConfirm, onReject }: {
                 <Icon name="cal" size={13} /> {item.slot.day} · {item.slot.time}
               </span>
               <span className="tag">{item.slot.provider}</span>
+              <span className="tag" title="How the patient picked this time">
+                <Icon name={isSms ? 'sms' : 'phone'} size={11} />&nbsp;{isSms ? 'SMS' : 'Voice'}
+              </span>
               {item.priority === 'urgent' && (
                 <span style={{ fontSize: 11.5, background: '#fee2e2', color: '#b91c1c', padding: '2px 8px', borderRadius: 99, fontWeight: 500 }}>
                   Urgent
@@ -180,13 +185,25 @@ function ConfirmCard({ item, onConfirm, onReject }: {
           className="collapse-toggle"
           onClick={() => setShowTranscript(s => !s)}
         >
-          <Icon name="transcript" size={12} />
-          {showTranscript ? 'Hide transcript' : 'View transcript'}
+          <Icon name={isSms ? 'sms' : 'transcript'} size={12} />
+          {isSms ? (showTranscript ? 'Hide texts' : 'View texts') : (showTranscript ? 'Hide transcript' : 'View transcript')}
           <Icon name="chevron" size={11} />
         </button>
       </div>
 
-      {showTranscript && (
+      {isSms && !showTranscript && (item.smsExcerpt?.length ?? 0) > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <SmsThread messages={item.smsExcerpt!.slice(-2)} maxHeight={180} compact />
+        </div>
+      )}
+
+      {showTranscript && isSms && (
+        <div style={{ marginTop: 14 }}>
+          <SmsThread messages={item.smsExcerpt ?? []} maxHeight={320} compact emptyText="No texts recorded." />
+        </div>
+      )}
+
+      {showTranscript && !isSms && (
         <div style={{ marginTop: 14 }}>
           <TranscriptPanel
             data={{
@@ -245,7 +262,7 @@ export default function ActionPage() {
     <>
       <PageHead
         title="Confirm captured slots"
-        sub="The AI captured these slots on calls. Commit them in your practice system, then mark confirmed."
+        sub="The AI captured these slots on calls or by text. Commit them in your practice system, then mark confirmed."
       >
         <div style={{ position: 'relative' }}>
           <button

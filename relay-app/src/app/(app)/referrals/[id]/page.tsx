@@ -22,6 +22,7 @@ import { Avatar } from "@/components/shared/Avatar";
 import { Icon } from "@/components/shared/Icon";
 import { TranscriptPanel } from "@/components/shared/TranscriptPanel";
 import { buildUpcomingSlots } from "@/lib/slots";
+import { SmsConversationCard } from "@/components/shared/SmsConversationCard";
 import type {
   Referral,
   ReferralState,
@@ -1374,6 +1375,11 @@ export default function ReferralDetailPage() {
 
         {/* Right: timeline + transcript */}
         <div className="stack" style={{ flex: 1.6 }}>
+          <SmsConversationCard
+            referralId={r.id}
+            dateOfBirth={r.patient.dateOfBirth}
+            onReferralChanged={loadReferral}
+          />
           <div className="card">
             <div className="card-head">
               <h3>Activity timeline</h3>

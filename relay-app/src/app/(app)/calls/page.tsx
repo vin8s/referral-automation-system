@@ -37,7 +37,7 @@ function exportLog(entries: ReferralLogEntry[], label: string) {
 }
 
 function typeChipStyle(type: ReferralLogEntry['type']): { bg: string; fg: string; label: string } {
-  if (type === 'ai_call')       return { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',  label: 'AI call'        };
+  if (type === 'ai_call')       return { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',  label: 'AI outreach'    };
   if (type === 'manual_update') return { bg: 'var(--st-queued-bg)',    fg: 'var(--st-queued-fg)',    label: 'Manual update'  };
   return                               { bg: 'var(--relay-tint)',       fg: 'var(--relay-ink-3)',     label: 'System'         };
 }
@@ -174,7 +174,7 @@ export default function CallsPage() {
 
   const typeFilters: { key: 'all' | 'ai_call' | 'manual_update' | 'system'; label: string; dot?: string }[] = [
     { key: 'all',           label: 'All'            },
-    { key: 'ai_call',       label: 'AI calls',       dot: 'var(--relay-accent)'   },
+    { key: 'ai_call',       label: 'AI outreach',    dot: 'var(--relay-accent)'   },
     { key: 'manual_update', label: 'Manual updates', dot: 'var(--st-queued-fg)'   },
     { key: 'system',        label: 'System events',  dot: 'var(--relay-ink-4)'    },
   ];
@@ -192,7 +192,7 @@ export default function CallsPage() {
     <>
       <PageHead
         title="Referral log"
-        sub="All activity — AI calls, manual edits, and system events, across every referral."
+        sub="All activity — AI calls and texts, manual edits, and system events, across every referral."
       >
         <button
           className="btn btn-sm"
@@ -358,6 +358,12 @@ export default function CallsPage() {
                     }}>
                       {chip.label}
                     </span>
+                    {entry.channel && (
+                      <span className="tag" style={{ marginLeft: 5, gap: 3 }} title={entry.channel === 'sms' ? 'Text message (SMS)' : 'Voice call'}>
+                        <Icon name={entry.channel === 'sms' ? 'sms' : 'phone'} size={10} />
+                        {entry.channel === 'sms' ? 'SMS' : 'Voice'}
+                      </span>
+                    )}
                   </td>
                   <td style={{ fontSize: 12.5, color: 'var(--relay-ink-3)' }}>{entry.who}</td>
                   <td style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

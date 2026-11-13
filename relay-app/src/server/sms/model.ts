@@ -2,9 +2,9 @@
 //
 //   mock (default): deterministic rule-based stand-in for local demos and tests.
 //                   NOT a safety layer and NOT production behavior.
-//   bedrock:        Claude on Amazon Bedrock via the Bedrock Runtime Converse API,
-//                   model BEDROCK_MODEL_ID, tool `sms_turn` with the JSON schema from
-//                   docs/SMS_AGENT_PROMPT.md §4.
+//   bedrock:        Claude on Amazon Bedrock via the Bedrock Runtime Converse API
+//                   (IAM: bedrock:InvokeModel), model BEDROCK_MODEL_ID, tool `sms_turn`
+//                   with the JSON schema from docs/SMS_AGENT_PROMPT.md §4, toolChoice auto.
 //
 // The model only ever receives: clinic name, patient FIRST name, the SMS thread,
 // and the turn context (SMS_AGENT_PROMPT §3). Never the DOB, referral reason or specialty.
@@ -157,6 +157,9 @@ function dowOf(isoWithOffset: string): number {
 
 // ── Bedrock (Converse API) ─────────────────────────────────────────────────
 
+/** Cheapest suitable model; override with BEDROCK_MODEL_ID (any current Claude model works). */
+export const DEFAULT_BEDROCK_MODEL_ID = 'anthropic.claude-haiku-5-5';
+
 type ConverseMessage = { role: 'user' | 'assistant'; content: { text: string }[] };
 
 /** Strips anything that could look like our own context markers out of patient text. */
@@ -166,8 +169,6 @@ function sanitizePatientText(s: string): string {
 
 export class BedrockSmsAgentModel implements SmsAgentModel {
   readonly name = 'bedrock' as const;
-  /** Newer Claude models reject a forced tool_choice; after one such error we use `auto` + the prompt instruction. */
-  private forceToolSupported = true;
   private client: Promise<import('@aws-sdk/client-bedrock-runtime').BedrockRuntimeClient> | null = null;
 
   private getClient() {
@@ -180,8 +181,7 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
   }
 
   async turn(input: ModelInput): Promise<unknown> {
-    const modelId = process.env.BEDROCK_MODEL_ID;
-    if (!modelId) throw new Error('BEDROCK_MODEL_ID is not set');
+    const modelId = process.env.BEDROCK_MODEL_ID || DEFAULT_BEDROCK_MODEL_ID;
     const { ConverseCommand } = await import('@aws-sdk/client-bedrock-runtime');
     const client = await this.getClient();
 
@@ -198,42 +198,39 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
     messages[messages.length - 1].content.push({ text: `<turn_context>${JSON.stringify(input.context)}</turn_context>` });
 
     const system = [{ text: buildSystemPrompt(input) }, { text: TURN_CONTEXT_NOTE }];
-    const toolConfig = (force: boolean) => ({
-      tools: [{
-        toolSpec: {
-          name: 'sms_turn',
-          description: 'Return the structured result of this SMS turn. Must be called exactly once per turn.',
-          inputSchema: { json: SMS_TURN_SCHEMA as unknown as Record<string, unknown> },
-        },
-      }],
-      toolChoice: force ? { tool: { name: 'sms_turn' } } : { auto: {} },
-    });
 
-    const call = (force: boolean) => client.send(new ConverseCommand({
+    // toolChoice is `auto`, NOT forced: current Claude models (Opus 5.5, Sonnet 5.5) reject a
+    // forced tool choice with a 400. The system prompt (TURN_CONTEXT_NOTE) requires exactly one
+    // sms_turn call; anything else is treated as invalid output by the engine (send nothing +
+    // amber agent_error). No temperature / top_p, no assistant prefill, no thinking settings:
+    // those are rejected by current models.
+    const res = await client.send(new ConverseCommand({
       modelId,
       system,
       messages,
       // The command's input types are generated unions; our plain objects match them structurally.
-      toolConfig: toolConfig(force) as never,
+      toolConfig: {
+        tools: [{
+          toolSpec: {
+            name: 'sms_turn',
+            description: 'Return the structured result of this SMS turn. Call it exactly once, every turn.',
+            inputSchema: { json: SMS_TURN_SCHEMA as unknown as Record<string, unknown> },
+          },
+        }],
+        toolChoice: { auto: {} },
+      } as never,
       inferenceConfig: { maxTokens: 4000 },
     }), { abortSignal: AbortSignal.timeout(25_000) });
 
-    let res;
-    try {
-      res = await call(this.forceToolSupported);
-    } catch (err) {
-      const e = err as { name?: string; message?: string };
-      if (this.forceToolSupported && e.name === 'ValidationException' && /tool_?choice/i.test(e.message ?? '')) {
-        this.forceToolSupported = false;
-        res = await call(false);
-      } else {
-        throw err;
-      }
+    // Refusal or truncation → invalid output (the engine fails safe).
+    const stop = String(res.stopReason ?? '');
+    if (stop === 'max_tokens' || stop === 'refusal' || stop === 'guardrail_intervened' || stop === 'content_filtered') {
+      throw Object.assign(new Error(`model stopped: ${stop}`), { name: 'ModelStopped' });
     }
-    const blocks = res.output?.message?.content ?? [];
-    const tool = blocks.find(b => b.toolUse?.name === 'sms_turn')?.toolUse;
-    if (!tool) throw Object.assign(new Error('model did not call sms_turn'), { name: 'NoToolUse' });
-    return tool.input;
+    // Read blocks by type: only toolUse matters; text / reasoning (thinking) blocks are ignored.
+    const calls = (res.output?.message?.content ?? []).filter(b => b.toolUse?.name === 'sms_turn');
+    if (calls.length !== 1) throw Object.assign(new Error(`expected one sms_turn call, got ${calls.length}`), { name: 'NoToolUse' });
+    return calls[0].toolUse!.input;
   }
 }
 
