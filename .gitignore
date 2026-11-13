@@ -21,3 +21,6 @@ relay-app/next-env.d.ts
 
 # vercel
 .vercel
+
+# Claude Code agent worktrees
+.claude/worktrees/
