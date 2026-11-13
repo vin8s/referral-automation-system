@@ -140,8 +140,9 @@ Messaging support. Always check the top-right region selector says **N. Virginia
 **Bedrock** is AWS's service for AI models; Claude runs inside it, covered by your BAA.
 1. Console search **Bedrock** → region **N. Virginia** → left menu **Model catalog**.
 2. Filter provider **Anthropic**, open the Claude model you'll use. The infrastructure defaults to
-   `anthropic.claude-opus-5-5` (setting `relay:bedrockModelId` in `infra/cdk.json`). A cheaper model (e.g. a
-   Haiku model) cuts AI cost a lot; that's a quality/cost decision to make together with the SMS script reviewer.
+   **Claude Haiku 5.5** (`anthropic.claude-haiku-5-5`, setting `relay:bedrockModelId` in `infra/cdk.json`) — the
+   cheapest current Claude model and a good fit for short scheduling texts. If testing against
+   `docs/CONVERSATION_TEST_CASES.md` shows it missing safety cases, switch to Claude Sonnet 5.5 (`anthropic.claude-sonnet-5-5`).
 3. The first time you use an Anthropic model, Bedrock asks for a short **use-case form**. Fill it in
    (company = clinic, use case = "patient appointment-scheduling text replies, human-reviewed").
 4. Open **Playground → Chat**, choose the model, type a **fake** test message. **Success:** Claude replies.

@@ -14,7 +14,7 @@
     "relay:clinicDisplayName": "Example Free Clinic",
     "relay:clinicPhoneNumber": "",
     "relay:smsOriginationIdentity": "",
-    "relay:bedrockModelId": "anthropic.claude-opus-5-5",
+    "relay:bedrockModelId": "anthropic.claude-haiku-5-5",
     "relay:outreachCron": "cron(0/10 8-17 ? * MON-FRI *)",
     "relay:outreachEnabled": true,
     "relay:pauseTexting": false,
