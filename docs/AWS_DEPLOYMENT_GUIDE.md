@@ -248,7 +248,7 @@ Open `infra/cdk.json` and change the `relay:*` values. **Never put passwords or 
 | `relay:clinicPhoneNumber` | Texting number, `+18885551234` (blank until Part 3 is done) |
 | `relay:smsOriginationIdentity` | Phone number ID from Part 3 step 4 (blank until then) |
 | `relay:bedrockModelId` | From Part 2 |
-| `relay:outreachCron` | When the outreach "tick" runs, in the clinic's time zone. Default `cron(0/10 8-17 ? * MON-FRI *)` = every 10 min, 8:00–17:50, Mon–Fri |
+| `relay:outreachCron` | When the outreach "tick" runs, in the clinic's time zone. Default `cron(0/10 8-19 ? * MON-SAT *)` = every 10 min, 8:00–19:50, Mon–Sat (matches the texting window in AGENT_SAFETY_RULES.md; Relay itself still enforces quiet hours) |
 | `relay:outreachEnabled` | `true` (set `false` to stop automatic outreach) |
 | `relay:pauseTexting` | `false` (emergency switch, Part 8) |
 | `relay:subscribeInboundSms` | `true` |

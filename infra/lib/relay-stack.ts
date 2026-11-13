@@ -106,7 +106,7 @@ export function readConfig(scope: IConstruct): RelayConfig {
     clinicPhoneNumber: str('clinicPhoneNumber'),
     smsOriginationIdentity: str('smsOriginationIdentity'),
     bedrockModelId: str('bedrockModelId', 'anthropic.claude-haiku-5-5'),
-    outreachCron: str('outreachCron', 'cron(0/10 8-17 ? * MON-FRI *)'),
+    outreachCron: str('outreachCron', 'cron(0/10 8-19 ? * MON-SAT *)'),
     outreachEnabled: bool('outreachEnabled', true),
     pauseTexting: bool('pauseTexting', false),
     subscribeInboundSms: bool('subscribeInboundSms', true),
