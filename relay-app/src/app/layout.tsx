@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 
@@ -19,6 +19,15 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Relay — Referral Conversion Platform',
   description: 'Voice AI referral conversion for specialist practices',
+  // The web app manifest (app/manifest.ts) is linked automatically.
+  applicationName: 'Relay',
+  appleWebApp: { capable: true, title: 'Relay', statusBarStyle: 'default' },
+  icons: { apple: '/pwa/apple-touch-icon.png' },
+};
+
+// Title-bar colour of the installed app: the Relay teal accent (--relay-accent).
+export const viewport: Viewport = {
+  themeColor: '#0d9488',
 };
 
 // The signed-in console shell lives in app/(app)/layout.tsx; /login renders bare.

@@ -27,7 +27,8 @@
 |---|---|---|---|---|---|---|---|
 | **Clinic ↔ Owner** | Owner builds and runs Relay for the clinic | Yes | BAA (if clinic is a covered entity) or volunteer confidentiality agreement | Clinic template, or lawyer-drafted. Signed by clinic director and owner. | Not started | | Must be signed before owner sees any real patient data. |
 | **AWS account BAA** | Covers all HIPAA-eligible AWS services in the account | — | AWS BAA | AWS Console → **AWS Artifact** → Agreements → accept the AWS BAA. Must be done by the account owner. | Not started | | Covers only HIPAA-eligible services, used per AWS rules. |
-| AWS Amplify | Hosts the Relay website | Yes (pages show patient data) | Covered by AWS BAA | — | Not started | | **Verify** Amplify Hosting is on the HIPAA-eligible list. |
+| Amazon ECS on AWS Fargate + Elastic Load Balancing | Hosts the Relay website (container behind an HTTPS load balancer) | Yes (pages show patient data) | Covered by AWS BAA | — | Not started | | Both on the HIPAA-eligible list (checked 2026-11-13). See `docs/AWS_HIPAA_CHECKLIST.md` for every AWS service used. Amplify is **not** used. |
+| Amazon SNS + SQS | Deliver inbound texts to Relay (and hold undeliverable ones) | Yes (message text) | Covered by AWS BAA | — | Not started | | Encrypted with the Relay KMS key. |
 | Amazon RDS (Postgres) | Database: referrals, messages, appointments | Yes | Covered by AWS BAA | — | Not started | | Turn on encryption and automated backups. |
 | Amazon Cognito | Staff login | Staff info only; low | Covered by AWS BAA | — | Not started | | Require MFA for all staff. |
 | Amazon Bedrock (Claude) | AI that writes text replies | Yes (message content) | Covered by AWS BAA | — | Not started | | **Verify** Bedrock and the specific Claude model are eligible in the chosen region. |

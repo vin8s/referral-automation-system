@@ -43,3 +43,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# bundled DB CLI for the Docker image (npm run build:db-cli)
+/dist-scripts/
