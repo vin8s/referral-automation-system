@@ -8,12 +8,15 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "db:migrate": "tsx scripts/db.ts migrate",
     "db:seed": "tsx scripts/db.ts seed",
     "db:reset": "tsx scripts/db.ts reset",
     "build:db-cli": "esbuild scripts/db.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-scripts/db.mjs --external:pg --external:@electric-sql/pglite"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1169.0",
+    "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.1169.0",
     "@base-ui/react": "^1.4.1",
     "@electric-sql/pglite": "^0.5.16",
     "class-variance-authority": "^0.7.1",
@@ -42,6 +45,7 @@
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.12"
   }
 }

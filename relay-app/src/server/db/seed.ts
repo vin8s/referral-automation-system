@@ -106,6 +106,11 @@ async function insertAll(tx: Queryable): Promise<void> {
     }
   }
 
+  // Fake patients only: record SMS consent so the texting pilot can be demoed
+  // locally. Real patients start with consent = false (002_sms.sql) until staff record it.
+  await tx.query(
+    `update patients set sms_consent = true, sms_consent_at = now(), sms_consent_source = 'seed (fake data)'`);
+
   await tx.query(
     `insert into practice_settings (id, settings) values ('default', $1::jsonb)
      on conflict (id) do nothing`,
@@ -123,5 +128,6 @@ export async function seedIfEmpty(db: Db): Promise<boolean> {
 
 /** Deletes all app data (keeps the schema). Used by `npm run db:reset`. */
 export async function truncateAll(db: Db): Promise<void> {
-  await db.query('truncate audit_log, appointments, call_attempts, referrals, patients, practice_settings');
+  await db.query(`truncate audit_log, appointments, call_attempts, messages, sms_conversations, needs_human_items,
+    sms_inbound_events, referrals, patients, practice_settings`);
 }

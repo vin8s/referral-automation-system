@@ -8,12 +8,14 @@
 // Function names and signatures are stable: screens should not need to change
 // when the server internals do.
 
-import { normalizeTime, normCalDay } from './format';
+import { normalizeTime } from './format';
+import { takenSlotKeys } from './slots';
 import type {
   Referral, ReferralState, Attempt, ConfirmQueueItem, UrgentAlert,
   CallLogEntry, CalendarEvent, PipelineCount, Analytics,
   Org, CurrentUser, DashboardFunnelStep, DashboardHealthSignals,
   Priority, ReferralLogEntry, PracticeSettings, DashboardCallActivity, RawSettings,
+  SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, OutreachTickResult,
 } from './types';
 
 export { normalizeTime };
@@ -73,16 +75,7 @@ export async function getCurrentUser(): Promise<CurrentUser> {
 // Used by callUtils to filter already-booked times out of the available_slots list.
 export async function getBookedSlotKeys(): Promise<Set<string>> {
   const referrals = await getReferrals();
-  const keys = new Set<string>();
-  for (const r of referrals) {
-    for (const slot of [r.capturedSlot, r.bookedAppointment].filter(Boolean) as { day: string; time: string }[]) {
-      if (slot.day && slot.time) {
-        const normalizedDay = normCalDay(slot.day) ?? slot.day.trim();
-        keys.add(`${normalizedDay}|${normalizeTime(slot.time)}`);
-      }
-    }
-  }
-  return keys;
+  return takenSlotKeys(referrals.flatMap(r => [r.capturedSlot, r.bookedAppointment]));
 }
 
 // ── Referrals ────────────────────────────────────────────────────────────────
@@ -276,4 +269,51 @@ export async function getDashboardFunnel(): Promise<DashboardFunnelStep[]> {
 
 export async function getDashboardHealthSignals(): Promise<DashboardHealthSignals> {
   return api<DashboardHealthSignals>('/dashboard/health');
+}
+
+// ── SMS texting ──────────────────────────────────────────────────────────────
+
+/** SMS thread, consent/opt-out, conversation state and open amber items for one referral. */
+export async function getSmsThread(referralId: string): Promise<SmsThread> {
+  return api<SmsThread>(`${ref(referralId)}/sms`);
+}
+
+/** Staff "Send text". Held until 8 am if sent during quiet hours. */
+export async function sendSmsText(referralId: string, body: string): Promise<{ success: boolean; status?: string; errorMsg?: string }> {
+  return mutate(`${ref(referralId)}/sms`, 'POST', { body });
+}
+
+export async function updateSmsPreferences(
+  referralId: string,
+  patch: { paused?: boolean; channelPreference?: SmsChannelPreference; consent?: boolean; consentSource?: string },
+): Promise<{ success: boolean; errorMsg?: string }> {
+  return mutate(`${ref(referralId)}/sms`, 'PATCH', patch);
+}
+
+/** Patient simulator (prototype; SMS_PROVIDER=mock only): a fake patient reply through the real inbound flow. */
+export async function simulatePatientReply(referralId: string, body: string): Promise<{ success: boolean; outcome?: string; errorMsg?: string }> {
+  return mutate(`${ref(referralId)}/sms/simulate`, 'POST', { body });
+}
+
+/** Open amber "needs a human" items across all referrals. */
+export async function getNeedsHumanItems(): Promise<NeedsHumanItem[]> {
+  return api<NeedsHumanItem[]>('/sms/needs-human');
+}
+
+export async function resolveNeedsHumanItem(itemId: string): Promise<{ success: boolean }> {
+  return mutate(`/sms/needs-human/${encodeURIComponent(itemId)}/resolve`, 'POST');
+}
+
+export async function getOutreachSettings(): Promise<OutreachSettingsView> {
+  return api<OutreachSettingsView>('/sms/settings');
+}
+
+/** Admin only. Throws ApiError (status 403) for non-admins. */
+export async function saveOutreachSettings(s: OutreachSettings): Promise<OutreachSettingsView> {
+  return api<OutreachSettingsView>('/sms/settings', { method: 'PUT', body: s });
+}
+
+/** Admin only: run the outreach scheduler once now (the same job EventBridge runs on a schedule). */
+export async function runOutreachNow(): Promise<OutreachTickResult> {
+  return api<OutreachTickResult>('/sms/outreach/tick', { method: 'POST' });
 }

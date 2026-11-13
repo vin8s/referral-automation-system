@@ -69,6 +69,23 @@ real site always needs an Amazon Cognito login.
   off for the pilot". That's expected. See `VOICE_ENABLED` in `relay-app/.env.example`.
 - **Activity is audited.** Every change, and every time someone opens a
   referral, is recorded in the `audit_log` table with who did it.
+- **Texting is simulated.** No real texts are sent and no AI service is called
+  locally. Texts are saved in the database and shown on each referral.
+
+### Try the texting demo (fake patients only)
+
+1. Sign in as **Alex Rivera** (admin). Go to **Settings → Texting (SMS)** and click
+   **Run outreach now**. Fake patients due for outreach get their first text
+   (only between 8 am and 8 pm, Monday–Saturday, clinic time).
+2. Open a referral (for example Grace Mwangi). The **Text messages** card shows the
+   thread. In the **Patient simulator (prototype)** box, click the patient's date of
+   birth chip, then **2**. The slot appears in **Confirm queue** as "SMS".
+3. In **Confirm queue**, click **Confirm**. The referral becomes **Booked** and the
+   patient gets the confirmation text.
+4. Try **STOP**, **HELP** or **I can't breathe** in the simulator: STOP opts the
+   patient out, HELP sends the help text, and the emergency phrase moves the
+   referral to the red **Escalated** state and pauses texting.
+5. **Pause all texting** (Settings) stops every outgoing text immediately.
 
 ## 6. Reset the local database
 

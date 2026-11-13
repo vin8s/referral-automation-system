@@ -6,7 +6,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE, verifySession } from '@/server/auth/session';
 
-const PUBLIC_PATHS = ['/login', '/api/auth/'];
+// Public paths authenticate themselves:
+//   /api/sms/inbound        — SNS signature + topic check (AWS End User Messaging inbound SMS)
+//   /api/sms/outreach/tick  — bearer OUTREACH_CRON_TOKEN (EventBridge Scheduler) or an admin session
+const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/sms/inbound', '/api/sms/outreach/tick'];
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;

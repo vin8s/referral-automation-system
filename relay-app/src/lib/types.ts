@@ -114,6 +114,10 @@ export interface ConfirmQueueItem {
   priority: Priority;
   summary: string;
   transcript: TranscriptTurn[];
+  /** Channel of the latest attempt: SMS-captured slots show the text thread instead of a call transcript. */
+  channel?: Channel;
+  /** Last few SMS messages (SMS-captured slots only). */
+  smsExcerpt?: SmsMessage[];
 }
 
 export interface UrgentAlert {
@@ -305,4 +309,107 @@ export interface ElevenLabsCallResult {
     transcript_summary?: string;
     data_collection_results?: Record<string, { value: unknown; rationale: string }>;
   };
+}
+
+// ── SMS texting (pilot channel) ───────────────────────────────────────────────
+
+export type SmsMessageStatus = 'received' | 'held' | 'sending' | 'sent' | 'delivered' | 'failed' | 'suppressed';
+
+export interface SmsMessage {
+  id: string;
+  direction: 'inbound' | 'outbound';
+  /** Who wrote it: the patient, a fixed template, the AI, a staff member, or the system. */
+  author: 'patient' | 'template' | 'ai' | 'staff' | 'system';
+  body: string;
+  templateKey: string | null;
+  status: SmsMessageStatus;
+  /** Clinic-local display time. */
+  at: string;
+  /** For held messages: when it will go out (clinic-local display time). */
+  sendAfter: string | null;
+  segments: number | null;
+  sentBy: string | null;
+  /** Why a message was suppressed / failed. */
+  note: string | null;
+}
+
+/** Amber "needs a human" item. Separate from the red Escalated state; never changes the referral state. */
+export interface NeedsHumanItem {
+  id: string;
+  referralId: string;
+  patient: string;
+  reasonCode: string;
+  reasonLabel: string;
+  summary: string | null;
+  pauseAutomation: boolean;
+  raisedAt: string;
+}
+
+export type SmsChannelPreference = 'sms' | 'voice' | 'none';
+
+export interface SmsThread {
+  referralId: string;
+  messages: SmsMessage[];
+  conversation: {
+    language: 'en' | 'es' | null;
+    identityVerified: boolean;
+    identityAttempts: number;
+    paused: boolean;
+    pausedReason: string | null;
+    channelPreference: SmsChannelPreference;
+    numberSuppressed: boolean;
+    outreachCount: number;
+    lifetimeCap: number;
+    /** Next outreach template, or null when the cycle is done / patient replied. */
+    nextStep: string | null;
+    exhausted: boolean;
+    offeredSlots: string[];
+  };
+  consent: {
+    consent: boolean;
+    consentAt: string | null;
+    consentSource: string | null;
+    optedOut: boolean;
+    optedOutAt: string | null;
+    optOutSource: string | null;
+  };
+  needsHuman: NeedsHumanItem[];
+  textingPaused: boolean;
+  /** SMS_PROVIDER=mock: the "Patient simulator (prototype)" box is available. */
+  simulatorEnabled: boolean;
+  provider: 'mock' | 'aws';
+  aiProvider: 'mock' | 'bedrock';
+}
+
+export interface OutreachSettings {
+  textingPaused: boolean;
+  quietStart: string;
+  quietEnd: string;
+  allowedDays: number[];
+  holidays: string[];
+  cadenceDays: number[];
+  lifetimeCap: number;
+  minSpacingHours: number;
+  exhaustedAfterHours: number;
+  aiDailyCap: number;
+}
+
+export interface OutreachSettingsView {
+  settings: OutreachSettings;
+  provider: 'mock' | 'aws';
+  aiProvider: 'mock' | 'bedrock';
+  timezone: string;
+  /** Development only: show the "Run outreach now" button. */
+  devTools: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface OutreachTickResult {
+  paused: boolean;
+  inWindow: boolean;
+  sent: number;
+  heldReleased: number;
+  amber: number;
+  skipped: Record<string, number>;
 }

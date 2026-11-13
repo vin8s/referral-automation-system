@@ -25,6 +25,9 @@ src/app/(app)/layout.tsx         re-checks the session, renders the shell
 | `src/server/config.ts` | Feature flags (`VOICE_ENABLED`) |
 | `src/server/log.ts` | `logError()`: logs error class/code only, never patient data |
 | `src/contexts/SessionContext.tsx` | `useSession()` → `{ user, isAdmin, voiceEnabled }` in client components |
+| `src/server/sms/` | SMS texting pilot (see below) |
+| `src/lib/slots.ts` | Shared slot availability grid + conflict keys (voice and SMS) |
+| `test/` | `npm test` (vitest): SMS guards, scheduling, SNS verification, engine scenarios on in-memory Postgres |
 | `.env.example` | Every environment variable, documented |
 
 ### Adding a feature (e.g. SMS, CSV import)
@@ -40,6 +43,30 @@ src/app/(app)/layout.tsx         re-checks the session, renders the shell
 
 Rules: no patient data in `console.*`; fake data only until the BAA is signed;
 roles are `ma` and `admin` (settings changes are admin-only).
+
+## SMS texting (pilot channel)
+
+An AI texts the patient, verifies identity by date of birth (checked by code, never by the
+model), offers 2–3 free slots and captures the one the patient picks. **Nothing books
+itself:** the captured slot goes to the MA confirm queue (`Pending Confirmation`). Rules come
+from `docs/AGENT_SAFETY_RULES.md`; the prompt and JSON contract from `docs/SMS_AGENT_PROMPT.md`.
+
+| File (`src/server/sms/`) | Role |
+|---|---|
+| `engine.ts` | Per-turn flow: keywords → emergency backstop → opt-out/suppression → model → validation → precedence → outbound guard → quiet hours → persist |
+| `outreach.ts` | `runOutreachTick()`: kill switch, quiet hours, cadence 0/2/5/9, caps, consent, minors, held-message release |
+| `guards.ts` | Pure safety code: STOP/HELP/START (EN+ES), emergency phrases, model-output validation, outbound guard, precedence, DOB comparison |
+| `schedule.ts` | Quiet hours (clinic time zone), cadence, caps, age |
+| `provider.ts` | `SmsProvider`: `mock` (records only) / `aws` (End User Messaging `SendTextMessage`) — `SMS_PROVIDER` |
+| `model.ts` | `SmsAgentModel`: `mock` rules / `bedrock` (Converse API, tool `sms_turn`, toolChoice auto) — `AI_PROVIDER` |
+| `sns.ts` | SNS signature + host checks for `/api/sms/inbound` |
+| `prompt.ts`, `templates.json` | Code copies of the doc prompt/schema and `docs/sms-templates.json` |
+| `repo.ts`, `index.ts` | SQL (tables in `db/migrations/002_sms.sql`) and the route-facing service layer |
+
+Endpoints: `GET/POST/PATCH /api/referrals/:id/sms`, `POST /api/referrals/:id/sms/simulate` (mock only),
+`GET /api/sms/needs-human`, `POST /api/sms/needs-human/:id/resolve`, `GET/PUT /api/sms/settings` (PUT admin),
+and two **public, self-authenticating** routes: `POST /api/sms/inbound` (SNS) and
+`POST /api/sms/outreach/tick` (bearer `OUTREACH_CRON_TOKEN` or an admin session).
 
 ## Production (AWS)
 
@@ -58,5 +85,5 @@ Infrastructure lives in [`../infra`](../infra) (AWS CDK); the beginner walkthrou
 
 ## Commands
 
-`npm run dev` · `npm run build` · `npm run lint` · `npm run typecheck` ·
+`npm run dev` · `npm run build` · `npm run lint` · `npm run typecheck` · `npm test` ·
 `npm run db:migrate` · `npm run db:seed` · `npm run db:reset`

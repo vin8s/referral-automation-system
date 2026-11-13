@@ -9,6 +9,7 @@ import {
   getBookedSlotKeys,
   normalizeTime,
 } from './data';
+import { buildUpcomingSlots } from './slots';
 import type { Referral, ReferralState, CallOutcome, ElevenLabsCallResult } from './types';
 
 // ── Pure helpers (duplicated from detail page to avoid cross-component import) ──
@@ -115,36 +116,6 @@ function outcomeFromResult(result: ElevenLabsCallResult): CallOutcome {
   // Any other termination defaults to Appointment Accepted → Pending Confirmation
   // so ambiguous calls never silently drop to Attempted.
   return 'Appointment Accepted';
-}
-
-const ALL_TIMES = ['9:00 AM', '10:30 AM', '2:00 PM', '4:00 PM'];
-
-function buildUpcomingSlots(n: number, bookedKeys: Set<string> = new Set()) {
-  const slots: { spoken_date: string; weekday: string; date: string; times: string[]; spoken_options: string[] }[] = [];
-  const cursor = new Date();
-  cursor.setDate(cursor.getDate() + 1);
-  cursor.setHours(0, 0, 0, 0);
-  while (slots.length < n) {
-    const dow = cursor.getDay();
-    if (dow !== 0 && dow !== 6) {
-      const weekday = cursor.toLocaleDateString('en-US', { weekday: 'long' });
-      const monthDay = cursor.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-      const year = cursor.getFullYear();
-      const day = cursor.getDate();
-      const suffix = day === 1 || day === 21 || day === 31 ? 'st'
-        : day === 2 || day === 22 ? 'nd'
-        : day === 3 || day === 23 ? 'rd' : 'th';
-      const spoken_date = `${weekday}, ${monthDay.replace(/\d+/, `${day}${suffix}`)}`;
-      // "DDD Mon D" key format matches normalizeSlotDay output stored in DB
-      const dayKey = `${DAY_S[cursor.getDay()]} ${MONTH_S[cursor.getMonth()]} ${cursor.getDate()}`;
-      const times = ALL_TIMES.filter(t => !bookedKeys.has(`${dayKey}|${t}`));
-      if (times.length > 0) {
-        slots.push({ spoken_date, weekday, date: `${monthDay}, ${year}`, times, spoken_options: times.map(t => `${spoken_date} at ${t}`) });
-      }
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return slots;
 }
 
 function delay(ms: number) {

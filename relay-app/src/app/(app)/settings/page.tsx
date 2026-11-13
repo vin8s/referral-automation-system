@@ -5,9 +5,11 @@ import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
 import { getSettings, saveSettings } from '@/lib/data';
 import { useSession } from '@/contexts/SessionContext';
+import { TextingSettings } from '@/components/screens/settings/TextingSettings';
 import type { CadenceConfig, CallOrderMode } from '@/lib/types';
 
 const SECTIONS = [
+  { id: 'texting',    label: 'Texting (SMS)',           icon: 'sms' },
   { id: 'cadence',    label: 'Cadence policy',          icon: 'history' },
   { id: 'scripts',   label: 'AI scripts & disclosure',  icon: 'transcript' },
   { id: 'quiet',     label: 'Quiet hours & compliance', icon: 'shield' },
@@ -352,6 +354,7 @@ function PracticeSettings() {
 }
 
 const PANEL: Record<string, React.ReactNode> = {
+  texting: <TextingSettings />,
   cadence: <CadenceSettings />,
   scripts: <ScriptsSettings />,
   quiet: <QuietSettings />,
@@ -360,11 +363,11 @@ const PANEL: Record<string, React.ReactNode> = {
 };
 
 export default function SettingsPage() {
-  const [section, setSection] = useState('cadence');
+  const [section, setSection] = useState('texting');
 
   return (
     <>
-      <PageHead title="Settings" sub="Configure your AI voice cadence and practice preferences.">
+      <PageHead title="Settings" sub="Configure texting, AI voice cadence and practice preferences.">
         <button className="btn btn-sm">Audit log</button>
       </PageHead>
 
