@@ -1,0 +1,439 @@
+{
+  "_meta": {
+    "status": "DRAFT - all wording must be reviewed and approved by the clinic's clinician before any patient use.",
+    "safety_rules": "docs/AGENT_SAFETY_RULES.md",
+    "readable_table": "docs/SMS_TEMPLATES.md",
+    "counting": "GSM-7: 160 chars in 1 segment, 153 per segment when longer. UCS-2: 70 in 1 segment, 67 per segment when longer. GSM-7 extension chars ^{}\\[~]|€ count as 2. Spanish á í ó ú (and capitals) are NOT in GSM-7 and force UCS-2 for the WHOLE message; ñ é ¿ ¡ ü ARE in GSM-7. Curly quotes/apostrophes and emoji also force UCS-2: always use straight ' and \".",
+    "sample_values_used_for_counts": {
+      "en": {
+        "clinic_name": "Community Health Clinic",
+        "patient_first_name": "Guadalupe",
+        "clinic_phone": "(555) 555-0123",
+        "slot_label": "Tue, Jun 3 at 10:00 AM",
+        "slot_1": "Tue, Jun 3 at 10:00 AM",
+        "slot_2": "Wed, Jun 4 at 2:30 PM",
+        "slot_3": "Thu, Jun 5 at 9:00 AM",
+        "appointment_date_time": "Tue, Jun 3 at 10:00 AM",
+        "location_short": "Main St. office"
+      },
+      "es": {
+        "clinic_name": "Community Health Clinic",
+        "patient_first_name": "Guadalupe",
+        "clinic_phone": "(555) 555-0123",
+        "slot_label": "martes 3 de junio, 10:00 a. m.",
+        "slot_1": "martes 3 de junio, 10:00 a. m.",
+        "slot_2": "miércoles 4 de junio, 2:30 p. m.",
+        "slot_3": "jueves 5 de junio, 9:00 a. m.",
+        "appointment_date_time": "martes 3 de junio, 10:00 a. m.",
+        "location_short": "oficina de Main St."
+      }
+    },
+    "notes": "filled_length/segments are for the message with the sample values filled in. Code must re-measure the final string before sending. es_gsm_variant (where present) is a reworded Spanish version that stays in GSM-7; whether to use it is a clinic decision (see SMS_TEMPLATES.md)."
+  },
+  "templates": [
+    {
+      "id": "first_outreach",
+      "purpose": "First message of a new outreach thread: AI disclosure + identity check. No details about the referral.",
+      "trigger": "Referral moves Queued -> In Progress (day 0)",
+      "quiet_hours": "Never sent in quiet hours; queued to next allowed window",
+      "counts_toward_cap": true,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "Hi {{patient_first_name}}, this is the automated scheduling assistant (AI) for {{clinic_name}}. Your provider asked us to help you make an appointment. To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.",
+        "filled_length": 245,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Hola {{patient_first_name}}, le escribe el asistente automatizado de citas (IA) de {{clinic_name}}. Su proveedor quiere que le ayudemos a hacer una cita. Para proteger su privacidad, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 273,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "follow_up_1",
+      "purpose": "Second outreach if no reply.",
+      "trigger": "No reply 48h after first_outreach (day 2)",
+      "quiet_hours": "Never sent in quiet hours; queued",
+      "counts_toward_cap": true,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "Hi {{patient_first_name}}, it's the automated assistant (AI) for {{clinic_name}} again. We'd like to help you schedule the appointment your provider requested. Reply with your date of birth (MM/DD/YYYY) to start. Reply STOP to opt out.",
+        "filled_length": 230,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Hola {{patient_first_name}}, le escribe otra vez el asistente automatizado (IA) de {{clinic_name}}. Queremos ayudarle a programar la cita que su proveedor pidió para usted. Para empezar, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 277,
+        "encoding": "UCS-2",
+        "segments": 5,
+        "non_gsm_chars": [
+          "ó"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "Hola {{patient_first_name}}, le escribe otra vez el asistente automatizado (IA) de {{clinic_name}}. Queremos ayudarle a programar la cita que su proveedor quiere para usted. Para empezar, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 278,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "follow_up_2",
+      "purpose": "Third outreach if no reply. Adds the clinic phone as an alternative.",
+      "trigger": "No reply by day 5",
+      "quiet_hours": "Never sent in quiet hours; queued",
+      "counts_toward_cap": true,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "{{clinic_name}} automated assistant (AI): Hi {{patient_first_name}}, we still have openings for the appointment your provider requested. Reply with your date of birth (MM/DD/YYYY) and we'll send times, or call {{clinic_phone}}. Reply STOP to opt out.",
+        "filled_length": 243,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Asistente automatizado (IA) de {{clinic_name}}: Hola {{patient_first_name}}, todavía tenemos horarios para la cita que su proveedor pidió para usted. Responda con su fecha de nacimiento (MM/DD/AAAA) y le mandamos opciones, o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 290,
+        "encoding": "UCS-2",
+        "segments": 5,
+        "non_gsm_chars": [
+          "í",
+          "ó"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "Asistente automatizado (IA) de {{clinic_name}}: Hola {{patient_first_name}}, seguimos teniendo horarios para la cita que su proveedor quiere para usted. Responda con su fecha de nacimiento (MM/DD/AAAA) y le mandamos opciones, o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 293,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "final_attempt",
+      "purpose": "Last automated outreach of the cycle. If no reply within 72h, create an amber needs-a-human item (cadence_exhausted).",
+      "trigger": "No reply by day 9",
+      "quiet_hours": "Never sent in quiet hours; queued",
+      "counts_toward_cap": true,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "{{clinic_name}} automated assistant (AI): Hi {{patient_first_name}}, this is our last text about the appointment your provider requested. To schedule, reply with your date of birth (MM/DD/YYYY) or call {{clinic_phone}}. Reply STOP to opt out.",
+        "filled_length": 235,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Asistente automatizado (IA) de {{clinic_name}}: Hola {{patient_first_name}}, este es nuestro último mensaje sobre la cita que su proveedor pidió para usted. Para hacer la cita, responda con su fecha de nacimiento (MM/DD/AAAA) o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 293,
+        "encoding": "UCS-2",
+        "segments": 5,
+        "non_gsm_chars": [
+          "ó",
+          "ú"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "Asistente automatizado (IA) de {{clinic_name}}: Hola {{patient_first_name}}, este es el mensaje final que le mandamos sobre la cita que su proveedor quiere para usted. Para hacer la cita, responda con su fecha de nacimiento (MM/DD/AAAA) o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 304,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "slot_offer",
+      "purpose": "Reference shape for offering times after identity is verified. The AI normally writes this turn; code may use it as a fallback.",
+      "trigger": "Identity verified",
+      "quiet_hours": "Reply held to next allowed window",
+      "counts_toward_cap": false,
+      "requires_identity_verified": true,
+      "en": {
+        "text": "Thanks, {{patient_first_name}}. Which time works? Reply 1, 2 or 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\nNone work? Tell us what days and times are best.",
+        "filled_length": 178,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Gracias, {{patient_first_name}}. ¿Qué horario le queda mejor? Responda 1, 2 o 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Díganos qué días y horas le quedan mejor.",
+        "filled_length": 231,
+        "encoding": "UCS-2",
+        "segments": 4,
+        "non_gsm_chars": [
+          "í"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "Gracias, {{patient_first_name}}. Responda 1, 2 o 3 con el horario que le quede mejor:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Cuéntenos qué fechas y horas le quedan mejor.",
+        "filled_length": 240,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "slot_captured",
+      "purpose": "Patient picked a time. Makes clear it is NOT booked until staff confirm.",
+      "trigger": "captured_slot returned and validated; referral moves to Pending Confirmation",
+      "quiet_hours": "Reply held to next allowed window",
+      "counts_toward_cap": false,
+      "requires_identity_verified": true,
+      "en": {
+        "text": "Thank you! We noted {{slot_label}}. This is not booked yet. A staff member will confirm it and text you. Questions? Call {{clinic_phone}}.",
+        "filled_length": 144,
+        "encoding": "GSM-7",
+        "segments": 1
+      },
+      "es": {
+        "text": "¡Gracias! Anotamos {{slot_label}}. Todavía no está reservada. Alguien del personal la va a confirmar y le mandará un mensaje. ¿Preguntas? Llame al {{clinic_phone}}.",
+        "filled_length": 178,
+        "encoding": "UCS-2",
+        "segments": 3,
+        "non_gsm_chars": [
+          "á",
+          "í"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "¡Gracias! Anotamos {{slot_label}}. La cita queda reservada solo cuando el personal la confirme. Le vamos a mandar un mensaje. ¿Preguntas? Llame al {{clinic_phone}}.",
+        "filled_length": 178,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "booked_confirmation",
+      "purpose": "Sent only after the MA books in eCW and clicks Confirm in Relay.",
+      "trigger": "MA confirm; referral moves to Booked",
+      "quiet_hours": "Never sent in quiet hours; queued",
+      "counts_toward_cap": false,
+      "requires_identity_verified": true,
+      "en": {
+        "text": "{{clinic_name}} (automated message): Your appointment is confirmed for {{appointment_date_time}} at {{location_short}}. Need to change it? Reply here or call {{clinic_phone}}. Reply STOP to opt out.",
+        "filled_length": 198,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "{{clinic_name}} (mensaje automatizado): Confirmamos su cita para el {{appointment_date_time}} en {{location_short}}. ¿Necesita cambiarla? Responda aquí o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 238,
+        "encoding": "UCS-2",
+        "segments": 4,
+        "non_gsm_chars": [
+          "í"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "{{clinic_name}} (mensaje automatizado): Confirmamos su cita para el {{appointment_date_time}} en {{location_short}}. ¿Necesita cambiarla? Responda a este mensaje o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 248,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "reminder_day_before",
+      "purpose": "Reminder the day before a Booked appointment.",
+      "trigger": "Booked appointment, day before, inside allowed window",
+      "quiet_hours": "Never sent in quiet hours",
+      "counts_toward_cap": false,
+      "requires_identity_verified": true,
+      "en": {
+        "text": "{{clinic_name}} automated reminder: {{patient_first_name}}, you have an appointment tomorrow, {{appointment_date_time}}, at {{location_short}}. Reply 1 if you're coming or 2 to change it, or call {{clinic_phone}}.",
+        "filled_length": 200,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Recordatorio automatizado de {{clinic_name}}: {{patient_first_name}}, tiene una cita mañana, {{appointment_date_time}}, en {{location_short}}. Responda 1 si va a venir o 2 para cambiarla, o llame al {{clinic_phone}}.",
+        "filled_length": 215,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "cancellation_reoffer",
+      "purpose": "A Booked appointment was canceled (eCW CSV import or staff). Referral re-enters outreach.",
+      "trigger": "Booked -> In Progress on cancel",
+      "quiet_hours": "Never sent in quiet hours; queued",
+      "counts_toward_cap": true,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "{{clinic_name}} automated assistant (AI): Hi {{patient_first_name}}, your appointment is no longer on our schedule. We can help you pick a new time. Reply with your date of birth (MM/DD/YYYY) to start, or call {{clinic_phone}}. Reply STOP to opt out.",
+        "filled_length": 243,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Asistente automatizado (IA) de {{clinic_name}}: Hola {{patient_first_name}}, su cita ya no aparece en nuestra agenda. Le podemos ayudar a escoger otro horario. Responda con su fecha de nacimiento (MM/DD/AAAA) para empezar, o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 290,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "stop_confirmation",
+      "purpose": "Sent once in reply to STOP/ALTO or a plain-language opt-out. The last message ever sent unless the patient opts back in.",
+      "trigger": "Opt-out keyword or natural-language opt-out",
+      "quiet_hours": "Sent immediately, any hour",
+      "counts_toward_cap": false,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "{{clinic_name}}: You will not get any more texts from us. To make an appointment, call {{clinic_phone}}. Reply START to get texts again.",
+        "filled_length": 142,
+        "encoding": "GSM-7",
+        "segments": 1
+      },
+      "es": {
+        "text": "{{clinic_name}}: Ya no le enviaremos mensajes de texto. Para hacer una cita, llame al {{clinic_phone}}. Responda START para volver a recibir mensajes.",
+        "filled_length": 156,
+        "encoding": "GSM-7",
+        "segments": 1
+      }
+    },
+    {
+      "id": "help_reply",
+      "purpose": "Reply to HELP/AYUDA. Follows the carrier (CTIA) HELP format.",
+      "trigger": "HELP keyword",
+      "quiet_hours": "Sent immediately, any hour",
+      "counts_toward_cap": false,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "{{clinic_name}} appointment texts, sent by an automated assistant (AI). Help: call {{clinic_phone}}. Emergency: call 911. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out.",
+        "filled_length": 200,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Mensajes de citas de {{clinic_name}}, enviados por un asistente automatizado (IA). Ayuda: llame al {{clinic_phone}}. Emergencia: llame al 911. Puede recibir varios mensajes. Pueden aplicar tarifas de mensajes y datos. Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 269,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "wrong_number",
+      "purpose": "Person says they are not the patient or do not know them. Reveals nothing more.",
+      "trigger": "wrong_number = true",
+      "quiet_hours": "Sent immediately, any hour",
+      "counts_toward_cap": false,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "Sorry for the mix-up. We will remove this number from our list and you won't get more texts about this. Take care.",
+        "filled_length": 114,
+        "encoding": "GSM-7",
+        "segments": 1
+      },
+      "es": {
+        "text": "Disculpe la molestia. Vamos a quitar este teléfono de nuestra lista y no le enviaremos más mensajes sobre esto. Que le vaya bien.",
+        "filled_length": 129,
+        "encoding": "UCS-2",
+        "segments": 2,
+        "non_gsm_chars": [
+          "á"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "Disculpe la molestia. Vamos a quitar este teléfono de nuestra lista y no le enviaremos otros mensajes sobre esto. Que le vaya bien.",
+        "filled_length": 131,
+        "encoding": "GSM-7",
+        "segments": 1
+      }
+    },
+    {
+      "id": "identity_not_verified",
+      "purpose": "DOB did not match after 2 tries, or the person cannot verify. Reveals nothing more.",
+      "trigger": "2 failed identity checks",
+      "quiet_hours": "Reply held to next allowed window",
+      "counts_toward_cap": false,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "Sorry, we could not verify that. To protect your privacy, a staff member will follow up. You can also call {{clinic_phone}}.",
+        "filled_length": 122,
+        "encoding": "GSM-7",
+        "segments": 1
+      },
+      "es": {
+        "text": "Lo sentimos, no pudimos verificar ese dato. Para proteger su privacidad, alguien del personal se comunicará con usted. También puede llamar al {{clinic_phone}}.",
+        "filled_length": 158,
+        "encoding": "UCS-2",
+        "segments": 3,
+        "non_gsm_chars": [
+          "á"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "Lo sentimos, no pudimos verificar ese dato. Para proteger su privacidad, alguien del personal le va a contactar. Si prefiere, puede llamar al {{clinic_phone}}.",
+        "filled_length": 157,
+        "encoding": "GSM-7",
+        "segments": 1
+      }
+    },
+    {
+      "id": "emergency_reply",
+      "purpose": "Medical emergency signal (red tier). Fixed text; the AI never improvises this.",
+      "trigger": "escalation.tier = red, reason emergency_medical / overdose_poisoning / violence_danger",
+      "quiet_hours": "Sent immediately, any hour",
+      "counts_toward_cap": false,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "This sounds like it could be an emergency. Please call 911 now or go to the nearest emergency room. I'm an automated assistant and can't help with this, but I am alerting our staff.",
+        "filled_length": 181,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Esto puede ser una emergencia. Por favor llame al 911 ahora o vaya a la sala de emergencias más cercana. Soy un asistente automatizado y no puedo ayudarle con esto, pero le voy a avisar al personal.",
+        "filled_length": 198,
+        "encoding": "UCS-2",
+        "segments": 3,
+        "non_gsm_chars": [
+          "á"
+        ]
+      },
+      "es_gsm_variant": {
+        "text": "Esto puede ser una emergencia. Por favor llame al 911 ahora o vaya a la sala de emergencias del hospital. Soy un asistente automatizado y no puedo ayudarle con esto, pero le voy a avisar al personal.",
+        "filled_length": 199,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "crisis_reply",
+      "purpose": "Suicidal thoughts / self-harm signal (red tier). Fixed text.",
+      "trigger": "escalation.tier = red, reason suicide_self_harm",
+      "quiet_hours": "Sent immediately, any hour",
+      "counts_toward_cap": false,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "You matter, and help is available right now. Call or text 988 (Suicide & Crisis Lifeline), free, 24/7. If you are in danger, call 911. I'm an automated assistant, and I am alerting our staff.",
+        "filled_length": 191,
+        "encoding": "GSM-7",
+        "segments": 2
+      },
+      "es": {
+        "text": "Usted es importante y hay ayuda ahora mismo. Llame al 988 y marque 2 para español, o mande AYUDA por texto al 988. Es gratis, 24 horas. Si corre peligro, llame al 911. Soy un asistente automatizado y le voy a avisar al personal.",
+        "filled_length": 228,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    },
+    {
+      "id": "human_handoff",
+      "purpose": "Amber tier: patient wants a person, is confused or upset, has a complaint, or asks clinical/cost/insurance questions.",
+      "trigger": "escalation.tier = amber",
+      "quiet_hours": "Amber item created immediately; reply held to next allowed window",
+      "counts_toward_cap": false,
+      "requires_identity_verified": false,
+      "en": {
+        "text": "Got it. I'm an automated assistant, so I'm asking a staff member to contact you. You can also call {{clinic_phone}} during office hours.",
+        "filled_length": 134,
+        "encoding": "GSM-7",
+        "segments": 1
+      },
+      "es": {
+        "text": "Entendido. Como soy un asistente automatizado, le pediré a alguien del personal que se comunique con usted. También puede llamar al {{clinic_phone}} en horario de oficina.",
+        "filled_length": 169,
+        "encoding": "GSM-7",
+        "segments": 2
+      }
+    }
+  ]
+}
