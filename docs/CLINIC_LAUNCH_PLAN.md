@@ -23,13 +23,13 @@ Everything left to take Relay from prototype to a live **SMS pilot** at the free
 | **First channel** | **SMS only** for the pilot | Cheaper, simpler, no call-recording laws. Voice (ElevenLabs + Twilio) comes later. |
 | **eCW schedule** | **CSV export** upload | Works in days with no eCW contract. HL7 live feed comes later. |
 | **How staff use it** | **Hosted website** with login, installable as a browser app | Replies and reminders need an always-on server anyway |
-| **Stack** | Amplify (hosting) · RDS Postgres (database) · Cognito (login) · Bedrock/Claude (AI) · End User Messaging (SMS) | All covered by the AWS BAA |
+| **Stack** | ECS Fargate + load balancer (hosting) · private RDS Postgres (database) · Cognito (login) · Bedrock/Claude (AI) · End User Messaging + SNS (SMS) · EventBridge Scheduler (outreach timer) · all built from `infra/` (AWS CDK) | All HIPAA-eligible under the AWS BAA. **Not Amplify**: Amplify supports Next.js only up to v15 and can't reach a private database. See `docs/AWS_DEPLOYMENT_GUIDE.md` |
 | **Supabase** | **Removed from the project entirely**, including development | One platform (AWS), one BAA, no second system to maintain |
 | **Development setup** | **No install needed**: `npm run dev` uses a built-in Postgres (PGlite) with fake data and a mock login. Optional local Postgres via `DATABASE_URL`. Production uses AWS RDS + Cognito. See `docs/LOCAL_DEV_SETUP.md` | Coding doesn't wait for the AWS account. RDS is also Postgres, so switching is one setting (`DATABASE_URL`). |
 
 **Golden rule:** no real patient data goes into any service until its BAA is signed. **Fake data only** until the soft launch.
 
-**Estimated cost:** about **$30–95/month** on AWS for the pilot, possibly covered by credits, plus **$0–2,500 one-time** for legal and LLC costs. These are rough estimates, not quotes.
+**Estimated cost:** about **$65–75/month** on AWS for the pilot (see `docs/clinic/COST_ESTIMATE.md`), possibly covered by credits, plus **$0–2,500 one-time** for legal and LLC costs. These are rough estimates, not quotes.
 
 ---
 
@@ -63,18 +63,18 @@ Start here; everything else depends on these answers.
 | ⬜ | Clinician approves the consent and AI-disclosure wording | |
 
 ### Phase 2: AWS account setup 🧑
-The AWS Deployment agent writes a step-by-step guide for this.
+Step-by-step: **`docs/AWS_DEPLOYMENT_GUIDE.md`** Parts 1–4.
 
 | Status | Task | Notes |
 |---|---|---|
-| ⬜ | Create the AWS account under the chosen owner | Turn on MFA for the root user |
-| ⬜ | Create an admin user for daily use | Never use the root user day to day |
+| ⬜ | Create the AWS account under the chosen owner | Choose the **Paid plan** (the Free plan auto-closes after 6 months). Turn on MFA for the root user |
+| ⬜ | Create an admin user for daily use | IAM Identity Center with MFA. Never use the root user day to day |
 | ⬜ | Accept the **AWS BAA** in AWS Artifact | Free, takes minutes |
-| ⬜ | Set **billing alarms** | e.g. alerts at $50 and $100/month |
+| ⬜ | Set **billing alarms** | $50 and $100/month budgets are created automatically by the deploy (`infra/`) |
 | ⬜ | Apply for nonprofit or startup credits | |
-| ⬜ | Turn on Bedrock access for Claude | |
+| ⬜ | Turn on Bedrock access for Claude | Submit the one-time Anthropic use-case form in the Bedrock console |
 | ⬜ | Buy an SMS number and start **toll-free verification or 10DLC** | Use the clinic's name. **Can take days to weeks, so start early.** |
-| ⬜ | Request SMS **production access** (leave the sandbox) | Through an AWS support case |
+| ⬜ | Request SMS **production access** (leave the sandbox) and a **spending limit** above $1/month | Through an AWS support case |
 | ⬜ | Register a domain | Route 53, about $15/year |
 | ⬜ | Price it in the AWS Pricing Calculator and share with the clinic | calculator.aws |
 
@@ -102,7 +102,7 @@ The AWS Deployment agent writes a step-by-step guide for this.
 | **C. Clinic Docs** | Clinic question list, vendor/BAA tracker, intake consent wording, staff cheat sheet, 30-minute training outline, test-case script, plan B if Relay goes down, one-page security policy, breach response steps | `docs/` only | ✅ Yes, no code conflicts |
 | **D. SMS texting** | `messages` table and opt-out flag; `sendSms` / `getMessageThread` / channel preference in the data layer; SMS thread on referral detail; SMS rows in the call log; channel setting; inbound reply webhook; AWS End User Messaging adapter (mocked first); AI replies via Bedrock; captured slots go to the MA confirm queue; quiet hours and attempt limits | `data.ts`, `types.ts`, referral detail, calls, settings, new API route | ⏳ After **A** is merged |
 | **E. eCW CSV import** | Upload screen; column mapping; match patients to referrals; auto-mark **Booked**; cancellations re-enter outreach; review list for unmatched rows | new import screen, `data.ts`, `types.ts`, Sidebar | ⏳ After **D** is merged (both edit `data.ts`); better with a real sample export |
-| **F. AWS Deployment** | Beginner step-by-step setup guide; Amplify hosting; RDS; Cognito; secrets in Secrets Manager; HTTPS and domain; backups; billing alarms; log retention; installable browser app (PWA) | new config files, `next.config.ts`, `public/`, `docs/` | ⏳ After **A** is merged and the AWS account exists |
+| **F. AWS Deployment** | Beginner step-by-step setup guide; ECS Fargate hosting (Dockerfile + CDK in `infra/`); RDS; Cognito; secrets in Secrets Manager; HTTPS and domain; backups; billing alarms; log retention; installable browser app (PWA) | new config files, `next.config.ts`, `public/`, `docs/` | ⏳ After **A** is merged and the AWS account exists |
 
 ### Run order
 
@@ -125,13 +125,18 @@ The AWS Deployment agent writes a step-by-step guide for this.
 
 ### Phase 6: Deploy to AWS 🤝
 
+Guide: **`docs/AWS_DEPLOYMENT_GUIDE.md`** Parts 5–7. Compliance check: **`docs/AWS_HIPAA_CHECKLIST.md`**.
+
 | Status | Task | Who |
 |---|---|---|
-| ⬜ | Follow the deployment guide to create the AWS resources | 🧑 with 🤖 guidance |
-| ⬜ | Run the database setup on RDS; create staff logins in Cognito | 🤝 |
+| ⬜ | Install tools on the Mac (Node 22, AWS CLI, Docker Desktop); fill in `infra/cdk.json` | 🧑 with 🤖 guidance |
+| ⬜ | `npx cdk bootstrap` then `npx cdk deploy` in `infra/` (creates network, private RDS, ECS Fargate app + load balancer + HTTPS, Cognito, secrets, SMS topic, outreach schedule, CloudTrail, alarms, budgets) | 🧑 with 🤖 guidance |
+| ⬜ | Check the database migrations ran (automatic at app start-up; see `/relay/app` logs); create staff logins in Cognito (`admin` / `ma` groups, MFA) | 🤝 |
 | ⬜ | Delete or pause the old Supabase project | 🧑 (it only ever held fake data) |
-| ⬜ | Connect texting to the real End User Messaging number | 🤝 |
-| ⬜ | Confirm the site requires login and nothing is publicly readable | 🤝 |
+| ⬜ | Connect texting: two-way SMS on the number → SNS topic `relay-inbound-sms`; subscription **Confirmed** | 🤝 |
+| ⬜ | Smoke tests: signed-out → `/login`, API → 401, HTTP → HTTPS, DB *not publicly accessible*, test text to own phone, outreach tick 200 | 🤝 |
+| ⬜ | Rehearse "pause all texting" and a backup restore once | 🤝 |
+| ⬜ | Tick every row in `docs/AWS_HIPAA_CHECKLIST.md` | 🤝 |
 
 ### Phase 7: Testing (fake patients only) 🤝
 
