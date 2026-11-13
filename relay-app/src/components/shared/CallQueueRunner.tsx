@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { getReferrals, getSettings } from '@/lib/data';
 import { runAndSaveCall, type CallProgress } from '@/lib/callUtils';
+import { useSession } from '@/contexts/SessionContext';
+import { VoiceOffNote, VOICE_OFF_TEXT } from './VoiceOff';
 import { StatePill } from '@/components/shared/StatePill';
 import { Icon } from '@/components/shared/Icon';
 import { useCallQueue } from '@/contexts/CallQueueContext';
@@ -155,6 +157,7 @@ function useResize(initial: { w: number; h: number }) {
 
 export function CallQueueRunner() {
   const { isOpen, minimized, setMinimized, closeQueue } = useCallQueue();
+  const { voiceEnabled } = useSession();
   const router = useRouter();
   const { size, startResizeW, startResizeH, startResizeCorner } = useResize({ w: 480, h: 560 });
   const [sessionState, setSessionState] = useState<SessionState>('loading');
@@ -550,8 +553,15 @@ export function CallQueueRunner() {
       }}>
         {sessionState === 'ready' && queue.length > 0 && (
           <>
+            {!voiceEnabled && <VoiceOffNote style={{ marginRight: 'auto' }} />}
             <button className="btn btn-sm" onClick={handleClose}>Cancel</button>
-            <button className="btn btn-sm btn-primary" onClick={handleStart}>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={handleStart}
+              disabled={!voiceEnabled}
+              title={voiceEnabled ? undefined : VOICE_OFF_TEXT}
+              style={voiceEnabled ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
+            >
               <Icon name="phone" size={12} /> Start calling {queue.length} patient{queue.length !== 1 ? 's' : ''}
             </button>
           </>

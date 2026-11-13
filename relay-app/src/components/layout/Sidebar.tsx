@@ -90,10 +90,12 @@ export function Sidebar() {
 
       <div className="sb-spacer" />
 
-      <button className="nav-item">
-        <Icon name="logout" size={15} />
-        Sign out
-      </button>
+      <form action="/api/auth/logout" method="post">
+        <button type="submit" className="nav-item">
+          <Icon name="logout" size={15} />
+          Sign out
+        </button>
+      </form>
     </aside>
   );
 }

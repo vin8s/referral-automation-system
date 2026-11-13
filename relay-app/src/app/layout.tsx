@@ -1,10 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
-import { Sidebar } from '@/components/layout/Sidebar';
-import { TopBar } from '@/components/layout/TopBar';
-import { Providers } from './providers';
-import { ActiveCallBanner } from '@/components/shared/ActiveCallBanner';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -25,21 +21,11 @@ export const metadata: Metadata = {
   description: 'Voice AI referral conversion for specialist practices',
 };
 
+// The signed-in console shell lives in app/(app)/layout.tsx; /login renders bare.
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <body className="app-root">
-        <Providers>
-          <Sidebar />
-          <div className="main">
-            <TopBar />
-            <ActiveCallBanner />
-            <div className="pg">
-              {children}
-            </div>
-          </div>
-        </Providers>
-      </body>
+      <body className="app-root">{children}</body>
     </html>
   );
 }
