@@ -19,8 +19,8 @@
 
 | Color | What you see | What it means | What you do | How fast |
 |---|---|---|---|---|
-| **AMBER** | **Pending Confirmation** pill, or an amber "needs a human" note | The patient picked a time, or asked for a person. Nothing is wrong — it's waiting for you. | Book it in eCW, then click **Confirm** in Relay. If they asked for a person, call them. | Same day |
-| **RED** | **Escalated** pill | The AI stopped. A human is needed: patient upset, a medical question, possible emergency, wrong number, or bad data. | Read the conversation. Call the patient. If it sounds like an emergency or a clinical issue, tell **[clinician name]** right away. Write a note, then resolve it. | **Right away** |
+| **AMBER** | **Pending Confirmation** pill, or an amber "needs a human" note | Waiting for a person — not a safety issue. The patient picked a time, asked for a person, is upset, asked a medical or cost question, said "wrong number", or the AI got confused. | Picked a time: book it in eCW, then click **Confirm** in Relay. Anything else: read the note and conversation, then call the patient or fix the record. Medical questions go to **[clinician name]**. | Same day |
+| **RED** | **Escalated** pill | **Safety only.** Possible medical emergency, overdose, danger/violence, or suicide/self-harm. The AI already told the patient to call 911 or 988 and stopped all texting. | Read the conversation. Call the patient now. Tell **[clinician name]** right away. Write a note, then resolve it. | **Right away** |
 
 The other states: **Queued** (waiting for first text) · **In Progress** (AI is texting) · **Booked** (you confirmed it). No action needed for these.
 

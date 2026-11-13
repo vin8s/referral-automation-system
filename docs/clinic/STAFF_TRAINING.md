@@ -50,9 +50,9 @@ Key points to say:
 | | AMBER | RED |
 |---|---|---|
 | Label | **Pending Confirmation** pill, or amber "needs a human" note | **Escalated** pill |
-| Meaning | Waiting for you; normal work | AI stopped; something needs human judgment |
-| Examples | Patient picked Tuesday 10am; patient asked "can I talk to a person?" | "I have chest pain"; "this is the wrong number"; angry patient; a medical question |
-| Action | Book in eCW → Confirm. Call if they want a person. | Read the conversation, call the patient, involve [clinician name] if clinical |
+| Meaning | Waiting for a person; not a safety issue | **Safety only**: possible emergency or crisis; AI stopped all texting |
+| Examples | Patient picked Tuesday 10am; "can I talk to a person?"; "this is the wrong number"; angry patient; a medical or cost question | "I have chest pain"; "I took too many pills"; "I want to hurt myself"; someone is in danger |
+| Action | Picked a time: book in eCW → Confirm. Otherwise read the note and call the patient or fix the record; medical questions go to [clinician name]. | Read the conversation, call the patient now, tell [clinician name] right away |
 | Speed | Same day | Right away |
 
 Emergency rule: if a patient mentions an emergency, the AI tells them to call **911** (or **988** for a mental health crisis) and flags red. Staff still follow up and tell [clinician name].
@@ -66,7 +66,7 @@ Each attendee does at least two. Use fake referrals prepared in advance.
 | 1 | Amber item: patient picked Thursday 2pm, and it's open in eCW | Book in eCW, then Confirm in Relay |
 | 2 | Amber item: patient picked Thursday 2pm, but eCW shows it's taken | Do **not** confirm. Return it so the AI offers other times, or call the patient |
 | 3 | Red **Escalated**: patient texted "my chest hurts" | Read thread, call patient now, tell [clinician name], document, resolve |
-| 4 | Red **Escalated**: "you have the wrong person" | Mark wrong number, fix number in eCW, don't text again |
+| 4 | Amber "needs a human": "you have the wrong person" | Mark wrong number, fix number in eCW, don't text again |
 | 5 | Patient calls the front desk: "Who keeps texting me?" | Explain it's the clinic; verify identity before discussing details |
 | 6 | Patient texts in Spanish | Check the AI answered in Spanish; if anything is unclear, use the interpreter process |
 | 7 | Relay won't load | Tell [Owner], switch to Plan B (phone calls) |
