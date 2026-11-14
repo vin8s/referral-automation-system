@@ -6,8 +6,8 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/shared/Icon';
 import { useSession } from '@/contexts/SessionContext';
-import { getOutreachSettings, runOutreachNow, saveOutreachSettings } from '@/lib/data';
-import type { OutreachSettings, OutreachSettingsView, OutreachTickResult } from '@/lib/types';
+import { getOutreachSettings, saveOutreachSettings } from '@/lib/data';
+import type { OutreachSettings, OutreachSettingsView } from '@/lib/types';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -35,7 +35,6 @@ export function TextingSettings() {
   const [cadenceText, setCadenceText] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [tick, setTick] = useState<OutreachTickResult | null>(null);
 
   useEffect(() => {
     getOutreachSettings().then(v => { setView(v); setS(v.settings); setCadenceText(v.settings.cadenceDays.join(', ')); });
@@ -159,35 +158,6 @@ export function TextingSettings() {
             {saving ? 'Saving…' : 'Save texting settings'}
           </button>
         </div>
-      </div>
-
-      <div className="card">
-        <div className="card-head">
-          <h3>Providers</h3>
-          <span style={{ fontSize: 12, color: 'var(--relay-ink-3)' }}>Set on the server (see .env.example)</span>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12.5 }}>
-          <span className="tag">SMS: {view.provider === 'aws' ? 'AWS End User Messaging' : 'mock (prototype, nothing is sent)'}</span>
-          <span className="tag">AI: {view.aiProvider === 'bedrock' ? 'Claude on Amazon Bedrock' : 'mock rules (prototype)'}</span>
-        </div>
-        {view.devTools && isAdmin && (
-          <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button className="btn btn-sm" onClick={async () => setTick(await runOutreachNow())}>
-              <Icon name="refresh" size={12} /> Run outreach now
-            </button>
-            <span style={{ fontSize: 12, color: 'var(--relay-ink-3)' }}>
-              Development only. In production, AWS EventBridge runs this on a schedule.
-            </span>
-            {tick && (
-              <div style={{ width: '100%', fontSize: 12.5, color: 'var(--relay-ink-2)' }}>
-                {tick.paused ? 'Texting is paused — nothing sent.' : `${tick.sent} sent · ${tick.heldReleased} held texts released · ${tick.amber} new needs-a-human items${tick.inWindow ? '' : ' · outside the sending window'}`}
-                {Object.keys(tick.skipped).length > 0 && (
-                  <span style={{ color: 'var(--relay-ink-4)' }}> · skipped: {Object.entries(tick.skipped).map(([k, v]) => `${k} (${v})`).join(', ')}</span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </>
   );

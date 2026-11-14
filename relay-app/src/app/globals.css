@@ -16,6 +16,10 @@
   --relay-accent-700: #0f766e;
   --relay-accent-800: #115e59;
 
+  /* Go — green, reserved for the single primary "run outreach" action */
+  --relay-go: #16a34a;
+  --relay-go-700: #15803d;
+
   /* Two-tier urgency: amber = "needs human" (never merge with Escalated red) */
   --relay-urgent: #d97706;
   --relay-urgent-50: #fffbeb;
@@ -381,6 +385,10 @@
   .btn-primary:hover { background: var(--relay-accent-700); }
   .btn-ghost { background: transparent; border-color: transparent; color: var(--relay-ink-2); }
   .btn-ghost:hover { background: var(--relay-tint); border-color: var(--relay-hairline); }
+  .btn-go { background: var(--relay-go); color: white; border-color: var(--relay-go-700); font-weight: 600; }
+  .btn-go:hover { background: var(--relay-go-700); }
+  .btn-go:disabled { opacity: .7; cursor: progress; }
+  .btn-lg { padding: 11px 22px; font-size: 15px; border-radius: 9px; gap: 8px; }
   .btn-danger { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
   .btn-danger:hover { background: #fecaca; }
   .btn-link { background: none; border: none; padding: 0; color: var(--relay-accent); font-size: inherit; cursor: pointer; text-decoration: underline; }
