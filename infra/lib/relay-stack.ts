@@ -105,8 +105,8 @@ export function readConfig(scope: IConstruct): RelayConfig {
     cognitoDomainPrefix: str('cognitoDomainPrefix', 'relay-clinic-change-me').toLowerCase(),
     clinicLoginName: str('clinicLoginName', 'Rhode Island Free Clinic'),
     alertEmail: str('alertEmail', 'owner@example.org'),
-    clinicTimeZone: str('clinicTimeZone', 'America/Los_Angeles'),
-    clinicDisplayName: str('clinicDisplayName', 'Example Free Clinic'),
+    clinicTimeZone: str('clinicTimeZone', 'America/New_York'),
+    clinicDisplayName: str('clinicDisplayName', 'Rhode Island Free Clinic'),
     clinicPhoneNumber: str('clinicPhoneNumber'),
     smsOriginationIdentity: str('smsOriginationIdentity'),
     bedrockModelId: str('bedrockModelId', 'us.anthropic.claude-haiku-4-5-20251001-v1:0'),
@@ -204,7 +204,7 @@ export class RelayStack extends Stack {
         parameters: { 'rds.force_ssl': '1' }, // refuse unencrypted connections
       }),
       backupRetention: Duration.days(14),
-      preferredBackupWindow: '09:00-09:30', // UTC = ~1–2 AM Pacific
+      preferredBackupWindow: '09:00-09:30', // UTC = 4–5 AM Eastern (clinic closed)
       preferredMaintenanceWindow: 'sun:10:00-sun:10:30',
       copyTagsToSnapshot: true,
       autoMinorVersionUpgrade: true,
