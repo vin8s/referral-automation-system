@@ -157,8 +157,8 @@ function dowOf(isoWithOffset: string): number {
 
 // ── Bedrock (Converse API) ─────────────────────────────────────────────────
 
-/** Cheapest suitable model; override with BEDROCK_MODEL_ID (any current Claude model works). */
-export const DEFAULT_BEDROCK_MODEL_ID = 'anthropic.claude-haiku-5-5';
+/** Claude Haiku 4.5 via its US inference profile (the newest Claude 5.5 models are blocked on this AWS project until advanced features are on). Override with BEDROCK_MODEL_ID. */
+export const DEFAULT_BEDROCK_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
 
 type ConverseMessage = { role: 'user' | 'assistant'; content: { text: string }[] };
 
