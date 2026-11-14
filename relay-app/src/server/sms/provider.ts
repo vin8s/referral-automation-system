@@ -153,6 +153,11 @@ export function getSmsProvider(): SmsProvider {
   if (want === 'twilio' && twilioForbidden()) {
     throw new Error('SMS_PROVIDER=twilio is for local testing only and is refused in production (no BAA with Twilio).');
   }
+  // Mock records texts as "delivered" without sending them (and enables the patient
+  // simulator): in production that would silently drop every patient text. Fail closed.
+  if (want === 'mock' && process.env.NODE_ENV === 'production') {
+    throw Object.assign(new Error('SMS_PROVIDER must be "aws" in production (mock is for development only).'), { name: 'SmsProviderMisconfigured' });
+  }
   if (!g.__relaySmsProvider || g.__relaySmsProvider.name !== want) {
     g.__relaySmsProvider = want === 'aws' ? new AwsSmsProvider() : want === 'twilio' ? new TwilioTestSmsProvider() : new MockSmsProvider();
   }

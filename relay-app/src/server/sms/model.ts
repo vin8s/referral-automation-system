@@ -311,6 +311,10 @@ const g = globalThis as unknown as { __relaySmsModel?: SmsAgentModel };
 
 export function getSmsAgentModel(): SmsAgentModel {
   const want = aiProviderName();
+  // The mock model is a keyword demo, not a safety layer: never let it talk to real patients.
+  if (want === 'mock' && process.env.NODE_ENV === 'production') {
+    throw Object.assign(new Error('AI_PROVIDER must be "bedrock" in production (mock is for development only).'), { name: 'AiProviderMisconfigured' });
+  }
   if (!g.__relaySmsModel || g.__relaySmsModel.name !== want) {
     g.__relaySmsModel = want === 'bedrock' ? new BedrockSmsAgentModel() : new MockSmsAgentModel();
   }
