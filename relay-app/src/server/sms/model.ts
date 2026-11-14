@@ -176,9 +176,22 @@ export const DEFAULT_BEDROCK_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-
 
 type ConverseMessage = { role: 'user' | 'assistant'; content: { text: string }[] };
 
-/** Strips anything that could look like our own context markers out of patient text. */
-function sanitizePatientText(s: string): string {
-  return s.replace(/<\/?\s*turn_context[^>]*>/gi, '').slice(0, 1600);
+/**
+ * Strips anything that could look like our own context markers out of patient text.
+ * - NFKC first, so look-alike characters (fullwidth ＜ ＞, etc.) become plain ASCII.
+ * - Repeats until nothing changes: a single pass can be beaten by nesting
+ *   ("<turn_<turn_context>context>" collapses into "<turn_context>").
+ * - Finally removes the bare marker word, so no fragment of it reaches the model.
+ */
+export function sanitizePatientText(s: string): string {
+  // Bounded input; every pass that changes something makes the text shorter, so the loop ends.
+  let text = s.slice(0, 4000).normalize('NFKC');
+  for (;;) {
+    const next = text.replace(/<\/?\s*turn_context[^>]*>/gi, '').replace(/turn_context/gi, '');
+    if (next === text) break;
+    text = next;
+  }
+  return text.slice(0, 1600);
 }
 
 export class BedrockSmsAgentModel implements SmsAgentModel {
