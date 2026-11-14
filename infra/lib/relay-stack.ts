@@ -449,7 +449,7 @@ export class RelayStack extends Stack {
     const taskRole = service.taskDefinition.taskRole;
     taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
       sid: 'SendSms',
-      actions: ['sms-voice:SendTextMessage'],
+      actions: ['sms-voice:SendTextMessage', 'sms-voice:SendRcsMessage'],
       resources: [`arn:${Aws.PARTITION}:sms-voice:${Aws.REGION}:${Aws.ACCOUNT_ID}:*`],
     }));
     taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
@@ -465,7 +465,7 @@ export class RelayStack extends Stack {
       taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
         sid: 'EmergencyPauseAllTexting',
         effect: iam.Effect.DENY,
-        actions: ['sms-voice:SendTextMessage', 'sms-voice:SendMediaMessage'],
+        actions: ['sms-voice:SendTextMessage', 'sms-voice:SendMediaMessage', 'sms-voice:SendRcsMessage'],
         resources: ['*'],
       }));
     }

@@ -44,6 +44,11 @@ export class MockSmsProvider implements SmsProvider {
   }
 }
 
+/** True when outbound messages should go out over RCS (AWS RCS agent IDs start with "rcs-"). */
+export function isRcsOrigination(origination: string): boolean {
+  return process.env.SMS_CHANNEL?.toLowerCase() === 'rcs' || /^rcs-/.test(origination);
+}
+
 export class AwsSmsProvider implements SmsProvider {
   readonly name = 'aws' as const;
   private client: Promise<import('@aws-sdk/client-pinpoint-sms-voice-v2').PinpointSMSVoiceV2Client> | null = null;
@@ -60,8 +65,24 @@ export class AwsSmsProvider implements SmsProvider {
   async send({ to, body }: { to: string; body: string }): Promise<SendResult> {
     const origination = process.env.SMS_ORIGINATION_IDENTITY;
     if (!origination) throw new Error('SMS_ORIGINATION_IDENTITY is not set');
-    const { SendTextMessageCommand } = await import('@aws-sdk/client-pinpoint-sms-voice-v2');
     const client = await this.getClient();
+
+    // RCS: when the origination identity is an AWS RCS agent (rcs-…) or SMS_CHANNEL=rcs.
+    // Inbound RCS replies use the same SNS payload as SMS, so /api/sms/inbound is unchanged.
+    if (isRcsOrigination(origination)) {
+      const { SendRcsMessageCommand } = await import('@aws-sdk/client-pinpoint-sms-voice-v2');
+      const res = await client.send(new SendRcsMessageCommand({
+        DestinationPhoneNumber: toE164(to),
+        OriginationIdentity: origination,
+        RcsMessageContent: { Content: { TextMessage: { Body: body } } } as never,
+        MessageTrafficType: 'TRANSACTIONAL',
+        ...(process.env.SMS_CONFIGURATION_SET ? { ConfigurationSetName: process.env.SMS_CONFIGURATION_SET } : {}),
+      }));
+      if (!res.MessageId) throw new Error('SendRcsMessage returned no MessageId');
+      return { providerMessageId: res.MessageId, status: 'sent' };
+    }
+
+    const { SendTextMessageCommand } = await import('@aws-sdk/client-pinpoint-sms-voice-v2');
     const res = await client.send(new SendTextMessageCommand({
       DestinationPhoneNumber: toE164(to),
       OriginationIdentity: origination,
