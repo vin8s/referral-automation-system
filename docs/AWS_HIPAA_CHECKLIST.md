@@ -56,7 +56,7 @@ NAT Gateway (cost), WAF (optional later, ~$6+/month).
 | ⬜ | AWS BAA accepted and recorded | AWS Artifact → Agreements → Active |
 | ⬜ | Root user has MFA, no access keys | IAM → Security credentials |
 | ⬜ | Daily admin via IAM Identity Center with MFA | Identity Center → Settings → Authentication |
-| ⬜ | Region is us-east-1 for everything | Resource lists |
+| ⬜ | Region is us-east-2 (Ohio) for everything (the project's home Region; other Regions are blocked by the organization's Region-restriction SCP) | Resource lists |
 | ⬜ | Database not publicly accessible | RDS → Connectivity → *Publicly accessible: No* |
 | ⬜ | Database encrypted, backups 14 days, deletion protection on | RDS → Configuration / Maintenance & backups |
 | ⬜ | Only HTTPS reaches the app | `curl -I http://…` → 301 to https |

@@ -51,7 +51,7 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 // ── Settings (cdk.json → "relay:*", or `-c relay:key=value`) ─────────────────
 
 export interface RelayConfig {
-  /** AWS Region for everything, e.g. us-east-1. */
+  /** AWS Region for everything. The project's home Region is us-east-2 (Ohio); the org's Region-restriction SCP denies regional services elsewhere. */
   region: string;
   /** Public hostname staff type into the browser, e.g. relay.myclinic.org. */
   domainName: string;
@@ -95,7 +95,7 @@ export function readConfig(scope: IConstruct): RelayConfig {
     return Number.isFinite(n) && n > 0 ? n : fallback;
   };
   return {
-    region: str('region', 'us-east-1'),
+    region: str('region', 'us-east-2'),
     domainName: str('domainName', 'relay.example.org').toLowerCase(),
     hostedZoneId: str('hostedZoneId'),
     hostedZoneName: str('hostedZoneName'),

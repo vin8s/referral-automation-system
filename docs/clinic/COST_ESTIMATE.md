@@ -16,7 +16,7 @@
 Architecture (built by `infra/`, see `docs/AWS_DEPLOYMENT_GUIDE.md`): **ECS Fargate** container behind an
 **Application Load Balancer** (HTTPS), **private RDS Postgres**, Cognito, Secrets Manager, Bedrock, End User
 Messaging + SNS, EventBridge Scheduler + Lambda, CloudWatch, CloudTrail, KMS. No NAT gateway.
-Region us-east-1, prices checked Nov 2026. **Estimates — verify in the calculator.**
+Priced for us-east-1 (Nov 2026); Relay deploys to us-east-2 (Ohio), where these services are priced the same or very close. **Estimates — verify in the calculator.**
 
 | Item | Assumption | ≈ $/month | Pricing page |
 |---|---|---|---|
