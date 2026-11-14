@@ -1,5 +1,6 @@
 // Bedrock adapter request/response handling, with the AWS SDK mocked (no network).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { HistoryTurn } from '@/server/sms/types';
 
 const sent: Record<string, unknown>[] = [];
 let response: Record<string, unknown> = {};
@@ -85,7 +86,7 @@ describe('BedrockSmsAgentModel', () => {
 describe('patient text sanitizing (prompt injection)', () => {
   beforeEach(() => { sent.length = 0; queue.length = 0; delete process.env.BEDROCK_MODEL_ID; });
 
-  const run = async (patientMessage: string, history = input.history) => {
+  const run = async (patientMessage: string, history: HistoryTurn[] = input.history) => {
     response = { stopReason: 'tool_use', output: { message: { content: [toolUse({})] } } };
     await new BedrockSmsAgentModel().turn({ ...input, history, patientMessage });
     return (sent[0] as { messages: { role: string; content: { text: string }[] }[] }).messages;
