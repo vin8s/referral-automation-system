@@ -6,6 +6,7 @@
 
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import { Icon } from '@/components/shared/Icon';
 import { authMode, clinicLoginName, type AuthMode } from '@/server/auth/config';
 import { getSessionUser } from '@/server/auth/guard';
@@ -53,10 +54,15 @@ export default async function LoginPage({
         <div className="card" style={{ padding: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
             <div className="sb-mark" aria-hidden="true" style={{ width: 40, height: 40, fontSize: 19, borderRadius: 11 }}>R</div>
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--relay-ink)', letterSpacing: '-0.01em' }}>Relay</div>
               <div style={{ fontSize: 12.5, color: 'var(--relay-accent-700)', fontWeight: 500 }}>{clinicLoginName()}</div>
             </div>
+            {/* The pilot clinic's own logo (public/brand/rifc-logo.png, from rifreeclinic.org). */}
+            <Image
+              src="/brand/rifc-logo.png" alt={clinicLoginName()} width={64} height={64} unoptimized
+              style={{ flex: '0 0 auto', borderLeft: '1px solid var(--relay-hairline)', paddingLeft: 10, boxSizing: 'content-box' }}
+            />
           </div>
 
           <h1 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 4px', color: 'var(--relay-ink)' }}>{c.title}</h1>

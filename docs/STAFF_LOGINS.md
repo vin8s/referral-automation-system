@@ -71,7 +71,7 @@ and in the audit log; you can leave it out and Relay will show the email instead
 ### What the staff member receives
 
 An email from **no-reply@verificationemail.com** with the subject
-**"Your Relay account for Clinica Esperanza / Hope Clinic"**, containing:
+**"Your Relay account for Rhode Island Free Clinic"**, containing:
 
 - the Relay address (`AppUrl`),
 - their username (their email address),
@@ -91,7 +91,7 @@ and shows 6-digit codes" (free from the App Store / Google Play).
 
 1. Open the Relay address. The Relay screen shows **Sign in** (and an **Español** button if
    they prefer Spanish; the AWS pages will then also be in Spanish).
-2. Press **Sign in**. They're taken to the clinic's sign-in page (teal, with the Relay logo;
+2. Press **Sign in**. They're taken to the clinic's sign-in page (white and teal, showing the Rhode Island Free Clinic logo next to the Relay mark;
    the address bar shows `…auth.us-east-2.amazoncognito.com`. That's expected; it's Amazon's
    login service working for the clinic).
 3. Enter their **email** and the **temporary password** from the email.

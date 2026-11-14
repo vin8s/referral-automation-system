@@ -62,5 +62,5 @@ export const secureCookies = () => isProd();
 
 /** Clinic name shown on the sign-in screen. */
 export function clinicLoginName(): string {
-  return process.env.CLINIC_LOGIN_NAME?.trim() || 'Clinica Esperanza / Hope Clinic';
+  return process.env.CLINIC_LOGIN_NAME?.trim() || 'Rhode Island Free Clinic';
 }

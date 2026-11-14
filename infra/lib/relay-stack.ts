@@ -103,7 +103,7 @@ export function readConfig(scope: IConstruct): RelayConfig {
     hostedZoneId: str('hostedZoneId'),
     hostedZoneName: str('hostedZoneName'),
     cognitoDomainPrefix: str('cognitoDomainPrefix', 'relay-clinic-change-me').toLowerCase(),
-    clinicLoginName: str('clinicLoginName', 'Clinica Esperanza / Hope Clinic'),
+    clinicLoginName: str('clinicLoginName', 'Rhode Island Free Clinic'),
     alertEmail: str('alertEmail', 'owner@example.org'),
     clinicTimeZone: str('clinicTimeZone', 'America/Los_Angeles'),
     clinicDisplayName: str('clinicDisplayName', 'Example Free Clinic'),
@@ -673,14 +673,16 @@ function verificationEmail(clinic: string): string {
  * Managed-login branding (AWS::Cognito::ManagedLoginBranding Settings). Partial on
  * purpose: Cognito uses its defaults for anything not listed. Colors are RRGGBBAA,
  * taken from relay-app/src/app/globals.css (--relay-accent #0d9488, --relay-accent-700
- * #0f766e, --relay-bg #f4f7f8, --relay-ink #0f172a). Text on these pages can't be
- * customized (only localized), so the clinic name lives in the logo image.
+ * #0f766e, --relay-bg #f4f7f8, --relay-ink #0f172a); headings use the clinic's navy
+ * #1E3A8A. Text on these pages can't be customized (only localized), so the clinic's
+ * identity lives in the logo image: infra/assets/cognito-form-logo.png = the Rhode Island
+ * Free Clinic logo (rifreeclinic.org) + the Relay mark.
  */
 function managedLoginSettings(): Record<string, unknown> {
   const accent = '0d9488ff';
   const accentDark = '0f766eff';
   const accentDeep = '115e59ff';
-  const ink = '0f172aff';
+  const clinicNavy = '1e3a8aff'; // Rhode Island Free Clinic brand navy (headings only)
   const ink2 = '334155ff';
   const ink3 = '64748bff';
   const hairline = 'd2d9ddff';
@@ -725,7 +727,7 @@ function managedLoginSettings(): Record<string, unknown> {
         lightMode: { backgroundColor: 'ffffffff', borderColor: 'e4e9ecff' },
         logo: { enabled: true, formInclusion: 'IN', location: 'CENTER', position: 'TOP' },
       },
-      pageText: { lightMode: { headingColor: ink, bodyColor: ink2, descriptionColor: ink3 } },
+      pageText: { lightMode: { headingColor: clinicNavy, bodyColor: ink2, descriptionColor: ink3 } },
       primaryButton: {
         lightMode: {
           defaults: { backgroundColor: accent, textColor: 'ffffffff' },
