@@ -14,7 +14,7 @@
 | Booking | AI collects preferred time → **MA books in eCW → MA confirms in Relay** |
 | eCW data | CSV appointment export uploaded [daily / twice a week] |
 | Text hours | [e.g. Mon–Fri, 9am–6pm] — no texts outside these hours |
-| Out of scope | Voice calls, live eCW feed, AI writing to the eCW calendar, other referral types |
+| Out of scope | AI phone calls (Relay is SMS-only), live eCW feed, AI writing to the eCW calendar, other referral types |
 
 ## 2. Roles
 
@@ -46,7 +46,7 @@ Dates are rough; SMS registration and legal review can add weeks.
 
 | Metric | Baseline (today) | Pilot target | How measured |
 |---|---|---|---|
-| % of referrals booked within 14 days | [__%] (from clinic) | [baseline + __ points] | Relay Analytics + eCW |
+| % of referrals booked within 14 days | [__%] (from clinic) | [baseline + __ points] | Relay referral export + eCW |
 | Median days from referral to booked | [__] | Lower | Relay |
 | % of texted patients who reply | — | [__%] | Relay |
 | **Safety incidents** (unsafe AI reply, missed emergency) | — | **0** | Transcript review |
@@ -112,5 +112,5 @@ All must be checked. The decision-maker signs.
 5. What did it cost per month and per booked patient?
 6. Did Spanish-speaking patients do as well as English-speaking patients?
 7. Did staff trust it? What would they change?
-8. Next step: **continue**, **expand** to more referral types, **add voice calls**, **add a live eCW feed**, or **stop**?
+8. Next step: **continue**, **expand** to more referral types, **add a live eCW feed**, or **stop**?
 9. If continuing: are agreements, budget and ownership right for the long term?

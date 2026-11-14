@@ -319,7 +319,7 @@ export const SMS_TURN_SCHEMA = {
         "Escalated",
         null
       ],
-      "description": "Matches CallOutcome in relay-app/src/lib/types.ts, for the SMS row in the call log."
+      "description": "Matches OutreachOutcome in relay-app/src/lib/types.ts, recorded on this text-outreach attempt."
     },
     "conversation_complete": {
       "type": "boolean"

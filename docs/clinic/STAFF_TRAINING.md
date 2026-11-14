@@ -43,7 +43,7 @@ Key points to say:
 | 5 | Open **Confirm queue** | Amber items wait here for you |
 | 6 | Book it in eCW (test patient) — **first** | eCW is the real schedule |
 | 7 | Click **Confirm** in Relay | Pill turns teal **Booked**; it appears on **Calendar** (read-only copy) |
-| 8 | Open **Urgent alerts** | Where red **Escalated** items show up |
+| 8 | Open the **Confirm queue** | One work list: red **Escalated** on top, then amber **Needs a human**, then slots to confirm |
 
 ## 0:12–0:17 — Amber vs. red
 

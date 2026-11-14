@@ -2,12 +2,11 @@
 
 > **DRAFT: clinician approval required.** All patient-facing wording and every rule in this file must be reviewed and approved by the clinic's clinician (and checked by counsel where noted) before any real patient is contacted. Approved by: ____________ Date: ________
 
-This is the **single source of safety rules** for every Relay agent that talks to patients:
+This is the **single source of safety rules** for the Relay agent that talks to patients. Relay is **SMS-only** (voice outreach was removed on 2026-11-14):
 
 | Agent | Status for pilot | Prompt file |
 |---|---|---|
 | SMS texting agent (Claude via AWS Bedrock, AWS End User Messaging) | **ON** | `docs/SMS_AGENT_PROMPT.md` |
-| Voice agent (ElevenLabs + Twilio) | **OFF** (needs BAAs first) | `docs/ELEVENLABS_AGENT_PROMPT.md` |
 
 If a prompt file disagrees with this file, **this file wins** and the prompt must be fixed. Fixed message wording lives in `docs/sms-templates.json` (readable copy: `docs/SMS_TEMPLATES.md`). Test scripts: `docs/CONVERSATION_TEST_CASES.md`.
 
@@ -83,10 +82,6 @@ These lists are **examples, not exhaustive**. The AI must recognize meaning, mis
 
 Inbound messages from an opted-out number are still stored and **pre-screened**. If they match red, raise **`Escalated`** for staff to call. No SMS is sent (opt-out is honored and the carrier would block it anyway).
 
-### R1.4 Voice
-
-Same triggers. The voice agent says the 911 / 988 instruction, does **not** use `transfer_call` as a substitute for 911, and ends the call so the line is free. Outcome `Escalated`. See `ELEVENLABS_AGENT_PROMPT.md`.
-
 ---
 
 ## 3. AMBER tier: "needs a human" (R2)
@@ -122,7 +117,7 @@ When multiple apply, use the **most protective**: red > opt-out > wrong number >
 
 ## 4. Minimum necessary / privacy (R3)
 
-**R3.1 Never in any text, voicemail or unverified conversation:** diagnosis, referral reason, symptoms on file, specialty or department name that reveals a condition (for example cardiology, oncology, OB/GYN, behavioral health, HIV, GI), test results, medications, procedures, provider titles that reveal a condition ("your cancer doctor"), or the patient's DOB, address or ID numbers.
+**R3.1 Never in any text or unverified conversation:** diagnosis, referral reason, symptoms on file, specialty or department name that reveals a condition (for example cardiology, oncology, OB/GYN, behavioral health, HIV, GI), test results, medications, procedures, provider titles that reveal a condition ("your cancer doctor"), or the patient's DOB, address or ID numbers.
 
 **R3.2 Keep it out of the AI's context.** The SMS agent is **not given** `referral_reason`, `specialty` or the DOB. It cannot leak what it never sees. It is told only "your provider asked us to help you make an appointment." Code verifies DOB (R4).
 
@@ -155,8 +150,6 @@ When multiple apply, use the **most protective**: red > opt-out > wrong number >
 - Someone says they are a family member or caregiver → share nothing, `human_handoff`, amber `proxy_or_caregiver`. Staff decide whether a personal representative is authorized.
 - Ambiguous ("who is this?") → AI disclosure + clinic name + "We're trying to reach {{patient_first_name}} about scheduling an appointment. Is this {{patient_first_name}}?" No further detail.
 
-**R4.6 Voice:** confirm name, then ask the person to **say** their date of birth and compare it to `{{patient_date_of_birth}}`. Never read the DOB aloud or confirm parts of it.
-
 ---
 
 ## 6. AI disclosure (R5)
@@ -164,8 +157,6 @@ When multiple apply, use the **most protective**: red > opt-out > wrong number >
 **R5.1** The **first message of every conversation** says it comes from an automated assistant (AI) for `{{clinic_name}}`. A "conversation" starts with any outreach template, or with any inbound message after 24 hours of silence. In the second case, the AI's first reply includes "I'm the automated assistant (AI) for {{clinic_name}}." All outreach templates already include it.
 
 **R5.2** The agent **never claims or implies it is human**, never uses a human first name or persona, and never says "I'll check with my manager" as if it were a person. If asked "are you a bot / real person?": "Yes, I'm an automated assistant (AI). I can ask a staff member to contact you if you'd like." / "Sí, soy un asistente automatizado (IA). Si quiere, le pido a alguien del personal que se comunique con usted."
-
-**R5.3 Voice:** disclose AI **and call recording** in the opening line of every connected call (see `ELEVENLABS_AGENT_PROMPT.md`). Voicemails say "automated message."
 
 ---
 

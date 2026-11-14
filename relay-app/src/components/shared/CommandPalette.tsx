@@ -10,15 +10,15 @@ import type { Referral } from '@/lib/types';
 // ── Quick nav links ────────────────────────────────────────────────────────────
 
 const NAV_LINKS = [
-  { label: 'Dashboard',         icon: 'home',     href: '/dashboard'  },
-  { label: 'Confirm queue',     icon: 'check',    href: '/action'     },
-  { label: 'Referrals',         icon: 'list',     href: '/referrals'  },
-  { label: 'Alerts',            icon: 'alert',    href: '/alerts'     },
-  { label: 'Referral log',      icon: 'transcript',href: '/calls'     },
-  { label: 'Calendar',          icon: 'cal',      href: '/calendar'   },
-  { label: 'Ingest referrals',  icon: 'upload',   href: '/ingest'     },
-  { label: 'Analytics',         icon: 'chart',    href: '/analytics'  },
-  { label: 'Settings',          icon: 'cog',      href: '/settings'   },
+  { label: 'Dashboard',         icon: 'home',     href: '/dashboard'       },
+  { label: 'Confirm queue',     icon: 'check',    href: '/action'          },
+  { label: 'Escalations & needs a human', icon: 'alert', href: '/action#escalated' },
+  { label: 'Referrals',         icon: 'list',     href: '/referrals'       },
+  { label: 'Messages log',      icon: 'sms',      href: '/messages'        },
+  { label: 'Calendar',          icon: 'cal',      href: '/calendar'        },
+  { label: 'Ingest referrals',  icon: 'upload',   href: '/ingest'          },
+  { label: 'eCW import',        icon: 'refresh',  href: '/schedule-import' },
+  { label: 'Settings',          icon: 'cog',      href: '/settings'        },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

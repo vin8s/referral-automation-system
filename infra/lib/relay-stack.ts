@@ -395,7 +395,6 @@ export class RelayStack extends Stack {
           COGNITO_ADMIN_GROUP: 'admin',
           COGNITO_MA_GROUP: 'ma',
           COGNITO_SCOPES: 'openid email profile',
-          VOICE_ENABLED: 'false',
           AWS_REGION: Aws.REGION,
           SMS_PROVIDER: 'aws',
           SMS_ORIGINATION_IDENTITY: cfg.smsOriginationIdentity,

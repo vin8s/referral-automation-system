@@ -128,14 +128,13 @@ export function SmsConversationCard({
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--relay-ink-3)' }}>
-          Channel
+          Automated texts
           <select
             className="select-sm" style={{ width: 'auto' }} value={c.channelPreference} disabled={busy}
             onChange={e => run(() => updateSmsPreferences(referralId, { channelPreference: e.target.value as SmsChannelPreference }))}
           >
-            <option value="sms">Text (SMS)</option>
-            <option value="voice">Phone calls only</option>
-            <option value="none">No automated outreach</option>
+            <option value="sms">On</option>
+            <option value="none">Off (staff contact only)</option>
           </select>
         </label>
         <button className="btn btn-sm" disabled={busy} onClick={() => run(() => updateSmsPreferences(referralId, { paused: !c.paused }))}>

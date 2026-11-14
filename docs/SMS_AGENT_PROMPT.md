@@ -48,19 +48,21 @@ Do **not** put these in the prompt, turn context or history: `referral_reason`, 
 
 `use_template`, if set, always overrides `reply_text`.
 
-### 1.4 Variable mapping across channels
+### 1.4 Variable sources
 
-| SMS variable | Voice equivalent (ElevenLabs) | Source |
-|---|---|---|
-| `patient_first_name` | `patient_first_name` | referral.patient.name (first token) |
-| `clinic_name` | `practice_name` | Settings (must not reveal a condition, R3.4) |
-| `clinic_phone` | `callback_number` (code currently sends `practice_phone_number`) | Settings |
-| `referring_provider` | `referring_provider` | referral.referringProvider |
-| `patient_preferred_language` | `patient_preferred_language` | referral.patient.language |
-| `today_date` | `today_date` | server, patient time zone |
-| `offered_slots` (structured, with IDs) | `available_slots_summary` / `available_slots_json` | availability read path, booked slots filtered out |
-| `location_short` | `preferred_location` | staff-set neutral label |
-| — not sent to SMS — | `referral_reason`, `specialty`, `patient_date_of_birth` | **never** to the SMS model |
+Relay is SMS-only (voice outreach was removed on 2026-11-14).
+
+| SMS variable | Source |
+|---|---|
+| `patient_first_name` | referral.patient.name (first token) |
+| `clinic_name` | Settings (must not reveal a condition, R3.4) |
+| `clinic_phone` | Settings (`CLINIC_PHONE_NUMBER`) |
+| `referring_provider` | referral.referringProvider |
+| `patient_preferred_language` | referral.patient.language |
+| `today_date` | server, patient time zone |
+| `offered_slots` (structured, with IDs) | availability read path, booked slots filtered out |
+| `location_short` | staff-set neutral label |
+| — never sent — `referral_reason`, `specialty`, `patient_date_of_birth` | **never** to the SMS model |
 
 ---
 
@@ -295,7 +297,7 @@ Recommended: give this to Bedrock as a **tool input schema** (tool name `sms_tur
       "type": ["string", "null"],
       "enum": ["Identity Verified", "Interested", "Appointment Accepted", "Call Back Requested",
                "Transferred to Staff", "Declined Referral", "Wrong Number", "Language Barrier", "Escalated", null],
-      "description": "Matches CallOutcome in relay-app/src/lib/types.ts, for the SMS row in the call log."
+      "description": "Matches OutreachOutcome in relay-app/src/lib/types.ts, recorded on this text-outreach attempt."
     },
     "conversation_complete": { "type": "boolean" }
   }

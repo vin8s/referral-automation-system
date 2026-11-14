@@ -1,5 +1,5 @@
-// Appointment slot availability — shared by the voice call flow (browser) and the
-// SMS agent (server). Pure: no data access, no side effects.
+// Appointment slot availability used by the SMS agent and the eCW import.
+// Pure: no data access, no side effects.
 //
 // Availability is the practice's standard weekday grid (ALL_SLOT_TIMES) minus any
 // slot already captured or booked in Relay. eCW stays the source of truth; the MA
@@ -54,36 +54,4 @@ export function busySlotsOnGrid(busy: { date: string; startMin: number; duration
     }
   }
   return out;
-}
-
-/**
- * Returns n upcoming weekday dates with free times and pre-formatted spoken labels,
- * so the voice agent mirrors the exact format ("Tuesday, June 11th at 4:00 PM").
- * Uses the browser's local time zone (voice flow).
- */
-export function buildUpcomingSlots(n: number, bookedKeys: Set<string> = new Set()) {
-  const slots: { spoken_date: string; weekday: string; date: string; times: string[]; spoken_options: string[] }[] = [];
-  const cursor = new Date();
-  cursor.setDate(cursor.getDate() + 1);
-  cursor.setHours(0, 0, 0, 0);
-  while (slots.length < n) {
-    const dow = cursor.getDay();
-    if (dow !== 0 && dow !== 6) {
-      const weekday = cursor.toLocaleDateString('en-US', { weekday: 'long' });
-      const monthDay = cursor.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-      const year = cursor.getFullYear();
-      const day = cursor.getDate();
-      const suffix = day === 1 || day === 21 || day === 31 ? 'st'
-        : day === 2 || day === 22 ? 'nd'
-        : day === 3 || day === 23 ? 'rd' : 'th';
-      const spoken_date = `${weekday}, ${monthDay.replace(/\d+/, `${day}${suffix}`)}`;
-      const dayKey = `${DAY_S[cursor.getDay()]} ${MONTH_S[cursor.getMonth()]} ${cursor.getDate()}`;
-      const times = ALL_SLOT_TIMES.filter(t => !bookedKeys.has(`${dayKey}|${t}`));
-      if (times.length > 0) {
-        slots.push({ spoken_date, weekday, date: `${monthDay}, ${year}`, times, spoken_options: times.map(t => `${spoken_date} at ${t}`) });
-      }
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return slots;
 }

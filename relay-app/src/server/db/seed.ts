@@ -3,7 +3,6 @@
 
 import type { Db, Queryable } from './driver';
 import { referrals as mockReferrals } from '../../lib/mockData';
-import { DEFAULT_SETTINGS } from '../../lib/settingsDefaults';
 
 const MONTHS: Record<string, number> = {
   Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
@@ -21,12 +20,6 @@ function mockTimeToIso(s: string | undefined, fallback?: string): string {
 
 function addMinutes(iso: string, min: number): string {
   return new Date(new Date(iso).getTime() + min * 60_000).toISOString();
-}
-
-/** "3:24" → 204, "0:00" → 0, "—" → null */
-function mockDurationToSecs(d: string): number | null {
-  const m = d.match(/^(\d+):(\d{2})$/);
-  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
 }
 
 /** "03/12/1959" → "1959-03-12" */
@@ -88,17 +81,27 @@ async function insertAll(tx: Queryable): Promise<void> {
       ],
     );
 
+    // Text-outreach attempts (Relay is SMS-only). Open referrals also get the matching
+    // messages so their text thread and the confirm-queue excerpts show the conversation
+    // (booked ones keep only the attempt summary, so their thread starts clean).
+    const seedMessages = r.state !== 'Booked';
     for (const a of r.attempts) {
+      const at = mockTimeToIso(a.timestamp, referralTime);
       await tx.query(
-        `insert into call_attempts (referral_id, attempted_at, channel, outcome, duration_secs,
+        `insert into call_attempts (referral_id, attempted_at, channel, outcome,
            disclosure_played, summary, transcript, slot_day)
-         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
-        [
-          r.id, mockTimeToIso(a.timestamp, referralTime), a.channel, a.outcome,
-          mockDurationToSecs(a.duration), a.disclosurePlayed, a.summary,
-          JSON.stringify(a.transcript), a.slotDay ?? null,
-        ],
+         values ($1,$2,'sms',$3,true,$4,$5::jsonb,$6)`,
+        [r.id, at, a.outcome, a.summary, JSON.stringify(a.transcript), a.slotDay ?? null],
       );
+      for (const [i, t] of (seedMessages ? a.transcript : []).entries()) {
+        const out = t.who === 'ai';
+        await tx.query(
+          `insert into messages (referral_id, patient_id, direction, author, body, status, provider, created_at, sent_at)
+           values ($1,$2,$3,$4,$5,$6,'mock',$7,$8)`,
+          [r.id, patientId, out ? 'outbound' : 'inbound', out ? 'ai' : 'patient', t.text,
+            out ? 'delivered' : 'received', addMinutes(at, i), out ? addMinutes(at, i) : null],
+        );
+      }
     }
 
     if (r.bookedAppointment) {
@@ -134,12 +137,6 @@ async function insertAll(tx: Queryable): Promise<void> {
   // locally. Real patients start with consent = false (002_sms.sql) until staff record it.
   await tx.query(
     `update patients set sms_consent = true, sms_consent_at = now(), sms_consent_source = 'seed (fake data)'`);
-
-  await tx.query(
-    `insert into practice_settings (id, settings) values ('default', $1::jsonb)
-     on conflict (id) do nothing`,
-    [JSON.stringify(DEFAULT_SETTINGS)],
-  );
 }
 
 /** Inserts the fake seed data. Returns false (and does nothing) if referrals already exist. */

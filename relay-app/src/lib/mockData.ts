@@ -2,9 +2,7 @@
 // Loaded into the database by src/server/db/seed.ts. Never imported by browser code.
 // State names match REFERRAL_STATUSES.md exactly.
 
-import type {
-  Referral, Org, CurrentUser, Analytics,
-} from './types';
+import type { Referral, Org, CurrentUser } from './types';
 
 export const org: Org = {
   productName: 'Relay',
@@ -34,23 +32,14 @@ export const referrals: Referral[] = [
     priority: 'normal',
     state: 'Pending Confirmation',
     capturedSlot: { day: 'Tue Apr 22', time: '2:15pm', provider: 'Dr. Park', capturedAgoMin: 11 },
-    attempts: [
-      { n: 1, timestamp: 'Apr 14, 9:02 AM', channel: 'voice', outcome: 'No Answer', duration: '0:00', disclosurePlayed: false, summary: 'No answer, no voicemail left.', transcript: [] },
-      { n: 2, timestamp: 'Apr 14, 1:40 PM', channel: 'voice', outcome: 'Appointment Accepted', duration: '3:24', disclosurePlayed: true,
-        summary: 'Patient reached; AI explained AFib follow-up and confirmed Medicare coverage to resolve cost concern. Accepted Tue Apr 22 2:15pm with Dr. Park.',
-        transcript: [
-          { who: 'ai', text: 'Hi, this is an automated assistant calling on behalf of Bay Cardiology. Is this James?' },
-          { who: 'patient', text: 'Yes, who is this again?' },
-          { who: 'ai', text: 'An AI assistant for Bay Cardiology. Dr. Chen referred you for an atrial fibrillation follow-up. Do you have a minute?' },
-          { who: 'patient', text: "I guess. I wasn't sure I really needed it, and I didn't know what it'd cost." },
-          { who: 'ai', text: "It's a follow-up to check on your heart rhythm and medication. With Medicare this visit is typically fully covered. Would a weekday afternoon work?" },
-          { who: 'patient', text: 'Afternoons are better, yeah.' },
-          { who: 'ai', text: "I have Tuesday April 22nd at 2:15pm with Dr. Park. Shall I hold that for you?" },
-          { who: 'patient', text: "That works." },
-          { who: 'ai', text: "Great — our staff will confirm it and you'll get a text shortly. Thank you, James." },
-        ],
-      },
-    ],
+    attempts: [{ n: 1, timestamp: 'Apr 14, 9:02 AM', outcome: 'No Answer', summary: 'First outreach text sent; no reply.', transcript: [] },
+      { n: 2, timestamp: 'Apr 14, 1:40 PM', outcome: 'Appointment Accepted', summary: 'Patient replied; identity confirmed with date of birth. Asked about cost; assistant pointed to the clinic for coverage questions. Picked Tue Apr 22 2:15pm with Dr. Park.', transcript: [
+          { who: 'ai', text: 'Bay Cardiology: automated text about a referral from your doctor. To continue, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.' },
+          { who: 'patient', text: '03/12/1959' },
+          { who: 'ai', text: 'Thanks, James. Dr. Chen referred you for a follow-up visit. Which time works? 1) Tue Apr 22 2:15pm 2) Wed Apr 23 9:00am 3) Thu Apr 24 3:30pm' },
+          { who: 'patient', text: '1. Is it covered? I wasn\'t sure what it would cost.' },
+          { who: 'ai', text: 'Clinic staff can answer coverage questions at (555) 555-0123. I\'ve noted Tue Apr 22 2:15pm with Dr. Park. Staff will confirm by text.' },
+        ] }],
     audit: [{ at: 'Apr 14, 1:43 PM', who: 'AI agent', what: 'Captured slot Tue Apr 22 2:15pm' }],
   },
   {
@@ -64,21 +53,13 @@ export const referrals: Referral[] = [
     priority: 'urgent',
     state: 'Pending Confirmation',
     capturedSlot: { day: 'Mon Apr 21', time: '11:30am', provider: 'Dr. Park', capturedAgoMin: 38 },
-    attempts: [
-      { n: 1, timestamp: 'Apr 14, 8:30 AM', channel: 'voice', outcome: 'Appointment Accepted', duration: '4:01', disclosurePlayed: true,
-        summary: 'Post-MI discharge referral. Patient anxious about returning so soon; AI reassured and secured Mon Apr 21 11:30am with Dr. Park.',
-        transcript: [
-          { who: 'ai', text: 'Hi, this is an automated assistant for Bay Cardiology. Am I speaking with Robert?' },
-          { who: 'patient', text: 'Yes.' },
-          { who: 'ai', text: "You were referred after your recent hospital stay for a heart attack follow-up. This one's important to schedule soon. Is now an okay time?" },
-          { who: 'patient', text: "It's been a stressful couple weeks, honestly." },
-          { who: 'ai', text: "That's completely understandable. This visit is mostly a check-in to make sure your recovery is on track. Would a morning be easier for you?" },
-          { who: 'patient', text: 'Mornings, yes.' },
-          { who: 'ai', text: "I can hold Monday April 21st at 11:30am with Dr. Park." },
-          { who: 'patient', text: "Okay, let's do that." },
-        ],
-      },
-    ],
+    attempts: [{ n: 1, timestamp: 'Apr 14, 8:30 AM', outcome: 'Appointment Accepted', summary: 'Urgent post-discharge referral. Patient replied quickly, verified identity and picked Mon Apr 21 11:30am with Dr. Park.', transcript: [
+          { who: 'ai', text: 'Bay Cardiology: automated text about a referral from your doctor. To continue, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.' },
+          { who: 'patient', text: '01/08/1954' },
+          { who: 'ai', text: 'Thanks, Robert. Your referral is for a follow-up visit. Which time works? 1) Mon Apr 21 11:30am 2) Tue Apr 22 9:00am' },
+          { who: 'patient', text: 'Mornings are better. 1 please' },
+          { who: 'ai', text: 'Noted: Mon Apr 21 11:30am with Dr. Park. Staff will confirm by text.' },
+        ] }],
     audit: [{ at: 'Apr 14, 8:34 AM', who: 'AI agent', what: 'Captured slot Mon Apr 21 11:30am' }],
   },
   {
@@ -92,22 +73,13 @@ export const referrals: Referral[] = [
     priority: 'normal',
     state: 'Pending Confirmation',
     capturedSlot: { day: 'Wed Apr 23', time: '10:00am', provider: 'Dr. Lin', capturedAgoMin: 22 },
-    attempts: [
-      { n: 1, timestamp: 'Apr 22, 9:18 AM', channel: 'voice', outcome: 'Appointment Accepted', duration: '2:51', disclosurePlayed: true,
-        summary: 'Patient was hesitant about transportation; AI offered telehealth option, patient agreed in-person is fine and accepted Wed Apr 23 at 10:00am with Dr. Lin.',
-        transcript: [
-          { who: 'ai', text: 'Hi, this is an automated assistant calling on behalf of Bay Cardiology. Am I speaking with Patricia?' },
-          { who: 'patient', text: 'Yes, speaking.' },
-          { who: 'ai', text: 'Dr. Park referred you for an atrial flutter evaluation with our EP team. Do you have a moment?' },
-          { who: 'patient', text: "I do, but I'm not sure how I'd get there — I don't drive anymore." },
-          { who: 'ai', text: 'I understand. We do offer telehealth appointments if that would be easier for you.' },
-          { who: 'patient', text: "Oh, I think I can arrange a ride. In-person is probably better for this kind of thing." },
-          { who: 'ai', text: 'That makes sense. I have Wednesday April 23rd at 10:00am with Dr. Lin available. Would that work?' },
-          { who: 'patient', text: "Yes, that should be fine." },
-          { who: 'ai', text: "Wonderful — our staff will confirm it shortly. Thank you, Patricia." },
-        ],
-      },
-    ],
+    attempts: [{ n: 1, timestamp: 'Apr 22, 9:18 AM', outcome: 'Appointment Accepted', summary: 'Patient asked about getting a ride; assistant pointed to the clinic for transport help. Picked Wed Apr 23 10:00am with Dr. Lin.', transcript: [
+          { who: 'ai', text: 'Bay Cardiology: automated text about a referral from your doctor. To continue, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.' },
+          { who: 'patient', text: '05/03/1958' },
+          { who: 'ai', text: 'Thanks, Patricia. Which time works? 1) Wed Apr 23 10:00am 2) Thu Apr 24 1:30pm' },
+          { who: 'patient', text: 'I don\'t drive anymore but my daughter can take me. 1 works' },
+          { who: 'ai', text: 'Noted: Wed Apr 23 10:00am with Dr. Lin. If you need help with a ride, call (555) 555-0123. Staff will confirm by text.' },
+        ] }],
     audit: [{ at: 'Apr 22, 9:21 AM', who: 'AI agent', what: 'Captured slot Wed Apr 23 10:00am' }],
   },
   {
@@ -121,23 +93,14 @@ export const referrals: Referral[] = [
     priority: 'normal',
     state: 'Pending Confirmation',
     capturedSlot: { day: 'Fri Apr 25', time: '3:30pm', provider: 'Dr. Chen', capturedAgoMin: 5 },
-    attempts: [
-      { n: 1, timestamp: 'Apr 24, 8:15 AM', channel: 'voice', outcome: 'No Answer', duration: '0:00', disclosurePlayed: false, summary: 'No answer; next attempt scheduled.', transcript: [] },
-      { n: 2, timestamp: 'Apr 24, 1:10 PM', channel: 'voice', outcome: 'Appointment Accepted', duration: '4:05', disclosurePlayed: true,
-        summary: 'Patient asked about parking; AI gave parking info. Patient accepted Fri Apr 25 at 3:30pm with Dr. Chen.',
-        transcript: [
-          { who: 'ai', text: 'Hi, this is an automated assistant calling on behalf of Bay Cardiology. Is this James Tan?' },
-          { who: 'patient', text: 'Yes, that\'s me.' },
-          { who: 'ai', text: 'Dr. Osei referred you for a statin management follow-up with our cardiology team. Do you have a minute?' },
-          { who: 'patient', text: 'Sure. Quick question — where do I park? Last time I had a hard time finding a spot.' },
-          { who: 'ai', text: 'There\'s a parking garage at 1500 Owens Street, and validated parking is available in the building\'s lot on the ground floor.' },
-          { who: 'patient', text: 'Good to know, thanks.' },
-          { who: 'ai', text: 'I have Friday April 25th at 3:30pm with Dr. Chen available. Would that work for you?' },
-          { who: 'patient', text: "That works for me." },
-          { who: 'ai', text: "Great — our staff will confirm it and send you a reminder. Thank you, James." },
-        ],
-      },
-    ],
+    attempts: [{ n: 1, timestamp: 'Apr 24, 8:15 AM', outcome: 'No Answer', summary: 'First outreach text sent; no reply.', transcript: [] },
+      { n: 2, timestamp: 'Apr 24, 1:10 PM', outcome: 'Appointment Accepted', summary: 'Patient asked where to park; assistant shared the clinic phone number. Picked Fri Apr 25 3:30pm with Dr. Chen.', transcript: [
+          { who: 'ai', text: 'Bay Cardiology: reminder about your referral. Please reply with your date of birth (MM/DD/YYYY) to continue. Reply STOP to opt out.' },
+          { who: 'patient', text: '08/14/1971' },
+          { who: 'ai', text: 'Thanks, James. Which time works? 1) Fri Apr 25 3:30pm 2) Mon Apr 28 10:00am' },
+          { who: 'patient', text: '1. Where do I park?' },
+          { who: 'ai', text: 'Noted: Fri Apr 25 3:30pm with Dr. Chen. For parking details call (555) 555-0123. Staff will confirm by text.' },
+        ] }],
     audit: [{ at: 'Apr 24, 1:14 PM', who: 'AI agent', what: 'Captured slot Fri Apr 25 3:30pm' }],
   },
   {
@@ -151,11 +114,10 @@ export const referrals: Referral[] = [
     priority: 'normal',
     state: 'In Progress',
     capturedSlot: null,
-    attempts: [
-      { n: 1, timestamp: 'Apr 14, 10:15 AM', channel: 'voice', outcome: 'Voicemail Left', duration: '0:38', disclosurePlayed: true, summary: 'Voicemail left (practice + callback only, no clinical detail). SMS fallback triggered in Spanish.', transcript: [{ who: 'ai', text: 'Hello, this is a message from Bay Cardiology. Please call us back at your convenience. Thank you.' }] },
-      { n: 2, timestamp: 'Apr 14, 10:16 AM', channel: 'sms', outcome: 'No Answer', duration: '—', disclosurePlayed: false, summary: 'SMS sent in Spanish with callback link. Awaiting response.', transcript: [] },
-    ],
-    audit: [{ at: 'Apr 14, 10:16 AM', who: 'System', what: 'SMS fallback (es) sent' }],
+    attempts: [{ n: 1, timestamp: 'Apr 14, 10:15 AM', outcome: 'No Answer', summary: 'First outreach text sent in Spanish; no reply yet.', transcript: [
+          { who: 'ai', text: 'Bay Cardiology: mensaje automático sobre una referencia de su médico. Para continuar, responda con su fecha de nacimiento (MM/DD/AAAA). Responda STOP para no recibir más mensajes.' },
+        ] }],
+    audit: [{ at: 'Apr 14, 10:15 AM', who: 'System', what: 'Outreach text (es) sent' }],
   },
   {
     id: 'REF-1047',
@@ -167,19 +129,13 @@ export const referrals: Referral[] = [
     location: 'Mission Bay',
     priority: 'urgent',
     state: 'Escalated',
-    escalation: { reason: 'Patient reported active chest pain during the call', severity: 'high', raisedAt: 'Apr 14, 9:48 AM', owner: null },
+    escalation: { reason: 'Patient reported active chest pain by text', severity: 'high', raisedAt: 'Apr 14, 9:48 AM', owner: null },
     capturedSlot: null,
-    attempts: [
-      { n: 1, timestamp: 'Apr 14, 9:46 AM', channel: 'voice', outcome: 'Escalated', duration: '1:12', disclosurePlayed: true,
-        summary: 'ESCALATED: patient described chest pain currently. AI stopped scheduling, advised it could not give medical guidance, and flagged for immediate human callback.',
-        transcript: [
-          { who: 'ai', text: 'Hi, this is an automated assistant for Bay Cardiology calling about a referral from Dr. Chen.' },
-          { who: 'patient', text: "Okay — honestly I've been having some chest tightness right now." },
-          { who: 'ai', text: "Thank you for telling me. I'm not able to give medical advice, and I'm going to have a member of the care team call you back right away. If this feels severe, please call 911." },
-          { who: 'patient', text: 'Alright.' },
-        ],
-      },
-    ],
+    attempts: [{ n: 1, timestamp: 'Apr 14, 9:46 AM', outcome: 'Escalated', summary: 'ESCALATED: patient reported chest tightness right now. Assistant stopped scheduling, sent the 911 safety message and flagged for immediate staff follow-up.', transcript: [
+          { who: 'ai', text: 'Bay Cardiology: automated text about a referral from your doctor. To continue, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.' },
+          { who: 'patient', text: '09/03/1962 - honestly I\'ve been having chest tightness right now' },
+          { who: 'ai', text: 'If this is an emergency, call 911 now. A member of our care team will contact you as soon as possible.' },
+        ] }],
     audit: [{ at: 'Apr 14, 9:48 AM', who: 'AI agent', what: 'Escalated — clinical (chest pain)' }],
   },
   {
@@ -194,19 +150,11 @@ export const referrals: Referral[] = [
     state: 'Booked',
     capturedSlot: { day: 'Thu Apr 17', time: '9:00am', provider: 'Dr. Lin', capturedAgoMin: null },
     bookedAppointment: { day: 'Thu Apr 17', time: '9:00am', provider: 'Dr. Lin', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 13, 11:05 AM', mirrorStatus: 'mirrored' },
-    attempts: [
-      { n: 1, timestamp: 'Apr 13, 10:50 AM', channel: 'voice', outcome: 'Appointment Accepted', duration: '2:48', disclosurePlayed: true,
-        summary: 'Patient accepted Thu Apr 17 9:00am with Dr. Lin. MA confirmed in practice system; mirrored to shadow calendar.',
-        transcript: [
-          { who: 'ai', text: 'Hi, this is an automated assistant for Bay Cardiology. Is this Yuki?' },
-          { who: 'patient', text: 'Speaking.' },
-          { who: 'ai', text: 'Dr. Osei referred you for a palpitations workup. Can I help you find a time?' },
-          { who: 'patient', text: 'Sure, mornings are best.' },
-          { who: 'ai', text: "I can hold Thursday April 17th at 9:00am with Dr. Lin." },
-          { who: 'patient', text: 'Perfect.' },
-        ],
-      },
-    ],
+    attempts: [{ n: 1, timestamp: 'Apr 13, 10:50 AM', outcome: 'Appointment Accepted', summary: 'Patient picked Thu Apr 17 9:00am with Dr. Lin by text. MA confirmed in practice system; mirrored to shadow calendar.', transcript: [
+          { who: 'ai', text: 'Thanks, Yuki. Which time works? 1) Thu Apr 17 9:00am 2) Fri Apr 18 2:00pm' },
+          { who: 'patient', text: '1, mornings are best' },
+          { who: 'ai', text: 'Noted: Thu Apr 17 9:00am with Dr. Lin. Staff will confirm by text.' },
+        ] }],
     audit: [
       { at: 'Apr 13, 10:53 AM', who: 'AI agent', what: 'Captured slot Thu Apr 17 9:00am' },
       { at: 'Apr 13, 11:05 AM', who: 'Priya Anand', what: 'Confirmed in practice system' },
@@ -282,7 +230,7 @@ export const referrals: Referral[] = [
     state: 'Booked' as const,
     capturedSlot: { day: 'Mon Apr 14', time: '9:30am', provider: 'Dr. Park', capturedAgoMin: null },
     bookedAppointment: { day: 'Mon Apr 14', time: '9:30am', provider: 'Dr. Park', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 11, 2:00 PM', mirrorStatus: 'mirrored' as const },
-    attempts: [{ n: 1, timestamp: 'Apr 10, 10:00 AM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '2:15', disclosurePlayed: true, summary: 'Patient accepted Mon Apr 14 9:30am with Dr. Park.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: 'Apr 10, 10:00 AM', outcome: 'Appointment Accepted' as const, summary: 'Patient picked Mon Apr 14 9:30am with Dr. Park by text.', transcript: [] }],
     audit: [{ at: 'Apr 10, 10:03 AM', who: 'AI agent', what: 'Captured slot Mon Apr 14 9:30am' }, { at: 'Apr 11, 2:00 PM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
   {
@@ -297,7 +245,7 @@ export const referrals: Referral[] = [
     state: 'Booked' as const,
     capturedSlot: { day: 'Tue Apr 15', time: '10:00am', provider: 'Dr. Lin', capturedAgoMin: null },
     bookedAppointment: { day: 'Tue Apr 15', time: '10:00am', provider: 'Dr. Lin', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 12, 9:00 AM', mirrorStatus: 'mirrored' as const },
-    attempts: [{ n: 1, timestamp: 'Apr 11, 9:30 AM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '3:10', disclosurePlayed: true, summary: 'Patient accepted Tue Apr 15 10:00am with Dr. Lin.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: 'Apr 11, 9:30 AM', outcome: 'Appointment Accepted' as const, summary: 'Patient picked Tue Apr 15 10:00am with Dr. Lin by text.', transcript: [] }],
     audit: [{ at: 'Apr 11, 9:33 AM', who: 'AI agent', what: 'Captured slot Tue Apr 15 10:00am' }, { at: 'Apr 12, 9:00 AM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
   {
@@ -312,7 +260,7 @@ export const referrals: Referral[] = [
     state: 'Booked' as const,
     capturedSlot: { day: 'Tue Apr 15', time: '2:00pm', provider: 'Dr. Chen', capturedAgoMin: null },
     bookedAppointment: { day: 'Tue Apr 15', time: '2:00pm', provider: 'Dr. Chen', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 12, 3:30 PM', mirrorStatus: 'mirrored' as const },
-    attempts: [{ n: 1, timestamp: 'Apr 12, 10:00 AM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '2:50', disclosurePlayed: true, summary: 'Patient accepted Tue Apr 15 2:00pm with Dr. Chen.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: 'Apr 12, 10:00 AM', outcome: 'Appointment Accepted' as const, summary: 'Patient picked Tue Apr 15 2:00pm with Dr. Chen by text.', transcript: [] }],
     audit: [{ at: 'Apr 12, 10:03 AM', who: 'AI agent', what: 'Captured slot Tue Apr 15 2:00pm' }, { at: 'Apr 12, 3:30 PM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
   {
@@ -327,7 +275,7 @@ export const referrals: Referral[] = [
     state: 'Booked' as const,
     capturedSlot: { day: 'Wed Apr 16', time: '3:00pm', provider: 'Dr. Park', capturedAgoMin: null },
     bookedAppointment: { day: 'Wed Apr 16', time: '3:00pm', provider: 'Dr. Park', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 13, 10:00 AM', mirrorStatus: 'mirrored' as const },
-    attempts: [{ n: 1, timestamp: 'Apr 12, 2:00 PM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '3:20', disclosurePlayed: true, summary: 'Patient accepted Wed Apr 16 3:00pm with Dr. Park.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: 'Apr 12, 2:00 PM', outcome: 'Appointment Accepted' as const, summary: 'Patient picked Wed Apr 16 3:00pm with Dr. Park by text.', transcript: [] }],
     audit: [{ at: 'Apr 12, 2:03 PM', who: 'AI agent', what: 'Captured slot Wed Apr 16 3:00pm' }, { at: 'Apr 13, 10:00 AM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
   {
@@ -342,7 +290,7 @@ export const referrals: Referral[] = [
     state: 'Booked' as const,
     capturedSlot: { day: 'Fri Apr 18', time: '10:00am', provider: 'Dr. Lin', capturedAgoMin: null },
     bookedAppointment: { day: 'Fri Apr 18', time: '10:00am', provider: 'Dr. Lin', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 13, 4:00 PM', mirrorStatus: 'mirrored' as const },
-    attempts: [{ n: 1, timestamp: 'Apr 13, 9:00 AM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '2:30', disclosurePlayed: true, summary: 'Patient accepted Fri Apr 18 10:00am with Dr. Lin.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: 'Apr 13, 9:00 AM', outcome: 'Appointment Accepted' as const, summary: 'Patient picked Fri Apr 18 10:00am with Dr. Lin by text.', transcript: [] }],
     audit: [{ at: 'Apr 13, 9:03 AM', who: 'AI agent', what: 'Captured slot Fri Apr 18 10:00am' }, { at: 'Apr 13, 4:00 PM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
   {
@@ -357,7 +305,7 @@ export const referrals: Referral[] = [
     state: 'Booked' as const,
     capturedSlot: { day: 'Mon Apr 28', time: '11:00am', provider: 'Dr. Chen', capturedAgoMin: null },
     bookedAppointment: { day: 'Mon Apr 28', time: '11:00am', provider: 'Dr. Chen', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 21, 3:00 PM', mirrorStatus: 'mirrored' as const },
-    attempts: [{ n: 1, timestamp: 'Apr 21, 9:00 AM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '3:45', disclosurePlayed: true, summary: 'Patient accepted Mon Apr 28 11:00am with Dr. Chen.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: 'Apr 21, 9:00 AM', outcome: 'Appointment Accepted' as const, summary: 'Patient picked Mon Apr 28 11:00am with Dr. Chen by text.', transcript: [] }],
     audit: [{ at: 'Apr 21, 9:03 AM', who: 'AI agent', what: 'Captured slot Mon Apr 28 11:00am' }, { at: 'Apr 21, 3:00 PM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
   {
@@ -372,7 +320,7 @@ export const referrals: Referral[] = [
     state: 'Booked' as const,
     capturedSlot: { day: 'Wed May 6', time: '2:30pm', provider: 'Dr. Park', capturedAgoMin: null },
     bookedAppointment: { day: 'Wed May 6', time: '2:30pm', provider: 'Dr. Park', confirmedBy: 'Priya Anand', confirmedAt: 'Apr 28, 4:00 PM', mirrorStatus: 'mirrored' as const },
-    attempts: [{ n: 1, timestamp: 'Apr 28, 9:00 AM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '2:55', disclosurePlayed: true, summary: 'Patient accepted Wed May 6 2:30pm with Dr. Park.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: 'Apr 28, 9:00 AM', outcome: 'Appointment Accepted' as const, summary: 'Patient picked Wed May 6 2:30pm with Dr. Park by text.', transcript: [] }],
     audit: [{ at: 'Apr 28, 9:03 AM', who: 'AI agent', what: 'Captured slot Wed May 6 2:30pm' }, { at: 'Apr 28, 4:00 PM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
   // Same patient as REF-1051, referred a second time (two open referrals for one person:
@@ -403,79 +351,26 @@ export const referrals: Referral[] = [
     priority: i % 6 === 0 ? 'urgent' : 'normal',
     state: 'In Progress',
     capturedSlot: null,
-    attempts: [{ n: 1, timestamp: `Apr ${11 + (i % 4)}, 9:00 AM`, channel: i % 3 === 0 ? 'sms' : 'voice', outcome: i % 3 === 1 ? 'Voicemail Left' : 'No Answer', duration: i % 3 === 1 ? '0:31' : '0:00', disclosurePlayed: i % 3 === 1, summary: i % 3 === 1 ? 'Voicemail left; SMS fallback queued.' : 'No answer; next attempt scheduled.', transcript: [] }],
+    attempts: [{ n: 1, timestamp: `Apr ${11 + (i % 4)}, 9:00 AM`, outcome: 'No Answer', summary: i % 3 === 1 ? 'Reminder text sent; no reply yet.' : 'First outreach text sent; no reply yet.', transcript: [] }],
     audit: [{ at: 'auto', who: 'System', what: 'In cadence' }],
   })),
 ];
 
-export const analytics: Analytics = {
-  dateRange: 'Last 30 days',
-  funnel: [
-    { stage: 'Referrals received', count: 412 },
-    { stage: 'Contacted', count: 351 },
-    { stage: 'Pending Confirmation', count: 188 },
-    { stage: 'Confirmed (booked)', count: 171 },
-    { stage: 'Visit completed', count: 154 },
-  ],
-  conversionLift: { baselinePct: 38, currentPct: 61, deltaPct: 23 },
-  recoveredRevenue: { amount: 287400, currency: 'USD', basis: 'converted + backlog re-activations' },
-  backlogReactivation: { deadReferralsRun: 240, recoveredVisits: 33, revenue: 61500 },
-  leakageByStage: [
-    { stage: 'Referral → contact', lostPct: 15, topSource: 'Fax — Alvarez Family Medicine' },
-    { stage: 'Contact → slot', lostPct: 46, topSource: 'SF General — discharge' },
-    { stage: 'Slot → confirmed', lostPct: 9, topSource: 'EHR feed' },
-    { stage: 'Confirmed → completed', lostPct: 10, topSource: '—' },
-  ],
-  shadowFidelity: {
-    currentPct: 97.4,
-    trend: [91.0, 93.2, 94.1, 95.5, 96.0, 96.8, 97.4],
-    threshold: 99.0,
-    status: 'below_threshold',
-    note: 'Mirror fidelity vs. the practice\'s real schedule. Migration trigger is sustained ≥ 99%.',
-  },
-  compliance: {
-    aiDisclosureRate: 100,
-    quietHourAdherence: 100,
-    optOutsHonored: 7,
-    voicemailPhiMinimized: 100,
-  },
-};
-
-export const dashboardCallActivity = {
-  window: 'last 24h · vs. typical day',
-  avgTimeToFirstAttemptMin: 17,
-  metrics: [
-    { label: 'Calls made',    value: 142, delta: '+18', deltaDir: 'up'   as const, cardDelta: '+18 vs. typical', spark: [80, 92, 88, 110, 98, 120, 134, 142] },
-    { label: 'Connected',     value: 61,  sub: '43% pickup',                        cardDelta: '43% pickup · steady', spark: [40, 42, 48, 50, 55, 58, 56, 61] },
-    { label: 'Slots captured',value: 14,  delta: '+4',  deltaDir: 'up'   as const, cardDelta: '+4 vs. typical', spark: [6, 7, 9, 8, 10, 11, 13, 14] },
-    { label: 'Confirmations', value: 11,  sub: '3 in queue',                        cardDelta: '3 in queue', spark: [4, 5, 7, 8, 8, 9, 10, 11] },
-    { label: 'No-answers',    value: 63,  delta: '−7',  deltaDir: 'down' as const, cardDelta: '−7 vs. typical', spark: [78, 72, 70, 68, 65, 64, 65, 63] },
-  ],
-};
-
-export const dashboardFunnel = [
-  { label: 'Queued',        n: 38, conv: null as null },
-  { label: 'Contacted',     n: 27, conv: 71 },
-  { label: 'Pending Confirmation', n: 14, conv: 52 },
-  { label: 'Confirmed',     n: 11, conv: 79 },
-  { label: 'Completed',     n: 9,  conv: 82 },
-];
-
 export const settingsDefaults = {
   cadence: {
-    attempts: ['Day 1 AM', 'Day 1 PM', 'Day 3', 'Day 5', 'Day 8', 'Day 12'],
-    channelEscalation: 'voice → voice (varied time) → SMS → human',
-    stopRules: ['Booked', 'Opt-out', '6 attempts exhausted'],
+    attempts: ['Day 0 first text', 'Day 2 reminder', 'Day 5 final text'],
+    channelEscalation: 'SMS → staff (amber "needs a human")',
+    stopRules: ['Booked', 'Opt-out (STOP)', 'No reply after final text'],
   },
   quietHours: { start: '8:00 AM', end: '8:00 PM', timezone: 'America/Los_Angeles' },
-  aiDisclosure: { locked: true, text: 'This is an automated assistant calling on behalf of {practice}.' },
+  aiDisclosure: { locked: true, text: 'Automated text from {practice}. Reply STOP to opt out.' },
   escalationTriggers: [
     'Reported clinical symptom',
     'Patient distress',
     'Wrong number / not the patient',
     'Explicit request for a human',
     'Cost question beyond published estimate',
-    '3 voicemails + 0 SMS engagement',
+    'No reply after the final outreach text',
   ],
   practiceProfile: {
     specialty: 'Cardiology',

@@ -20,7 +20,7 @@ Everything left to take Relay from prototype to a live **SMS pilot** at the free
 | Topic | Decision | Why |
 |---|---|---|
 | **Cloud** | Everything on **AWS** | One free, self-serve BAA (AWS Artifact) covers hosting, database, AI and texting |
-| **First channel** | **SMS only** for the pilot | Cheaper, simpler, no call-recording laws. Voice (ElevenLabs + Twilio) comes later. |
+| **Channel** | **SMS only** | Cheaper, simpler, no call-recording laws. As of 2026-11-14 voice outreach was removed from Relay entirely. |
 | **eCW schedule** | **CSV export** upload | Works in days with no eCW contract. HL7 live feed comes later. |
 | **How staff use it** | **Hosted website** with login, installable as a browser app | Replies and reminders need an always-on server anyway |
 | **Stack** | ECS Fargate + load balancer (hosting) · private RDS Postgres (database) · Cognito (login) · Bedrock/Claude (AI) · End User Messaging + SNS (SMS) · EventBridge Scheduler (outreach timer) · all built from `infra/` (AWS CDK) | All HIPAA-eligible under the AWS BAA. **Not Amplify**: Amplify supports Next.js only up to v15 and can't reach a private database. See `docs/AWS_DEPLOYMENT_GUIDE.md` |
@@ -87,9 +87,9 @@ Step-by-step: **`docs/AWS_DEPLOYMENT_GUIDE.md`** Parts 1–4.
 | Finding | Why it matters |
 |---|---|
 | **Newest work is only on `origin/Saajan`** | Your 4 newest commits (call queue runner, ElevenLabs voice agent, `supabase-setup.sql`) aren't on `main`. Merge first so every agent starts from the latest version. |
-| **`/api/calls/initiate` has no login check** | Once online, anyone who finds it could place calls billed to you. Must be fixed before hosting. |
+| ~~**`/api/calls/initiate` has no login check**~~ | Resolved: all voice-call routes were deleted (SMS-only, 2026-11-14). |
 | **The app is built on Supabase** | `data.ts` and `supabase.ts` use the Supabase library, and the browser talks to the database directly. Moving to AWS means only Relay's server talks to the database, with Supabase code removed. |
-| **Voice uses ElevenLabs + Twilio** | Two more vendors needing BAAs, so voice is off for the pilot. |
+| ~~**Voice uses ElevenLabs + Twilio**~~ | Resolved: voice was removed (SMS-only, 2026-11-14), so neither vendor is needed. |
 
 ### Agents
 
@@ -98,9 +98,9 @@ Step-by-step: **`docs/AWS_DEPLOYMENT_GUIDE.md`** Parts 1–4.
 | Agent | Job | Main files it touches | Can start now? |
 |---|---|---|---|
 | **A. Foundation (Supabase → AWS)** | **Remove Supabase completely**: delete `supabase.ts`, the `@supabase/supabase-js` package and the Supabase settings in `.env.local`. Use a standard Postgres connection that works with local Postgres now and AWS RDS later. Convert `supabase-setup.sql` into plain Postgres migration files, dropping Supabase-only parts. Move all database access to Relay's server (the browser never touches the database), keeping data-layer function names so screens don't change. Add **Cognito** staff login (mock login for local development), roles (MA/admin) and protection on every API route, including `/api/calls/*`. Add an audit log; keep patient data out of logs. Write a setup guide for local Postgres on a Mac. | `data.ts`, `supabase.ts` (deleted), `package.json`, new API routes, login page, `layout.tsx`, migrations, `docs/` | ✅ **Yes, highest priority** |
-| **B. Scripts & Safety** | SMS agent prompt based on `ELEVENLABS_AGENT_PROMPT.md`; emergencies (chest pain, suicidal thoughts) → tell the patient to call 911/988 and flag red **Escalated**; "talk to a human" → amber item; no medical details in texts; AI disclosure; identity check; STOP/HELP; Spanish | `docs/` only | ✅ Yes, no code conflicts |
+| **B. Scripts & Safety** | SMS agent prompt (`SMS_AGENT_PROMPT.md`); emergencies (chest pain, suicidal thoughts) → tell the patient to call 911/988 and flag red **Escalated**; "talk to a human" → amber item; no medical details in texts; AI disclosure; identity check; STOP/HELP; Spanish | `docs/` only | ✅ Yes, no code conflicts |
 | **C. Clinic Docs** | Clinic question list, vendor/BAA tracker, intake consent wording, staff cheat sheet, 30-minute training outline, test-case script, plan B if Relay goes down, one-page security policy, breach response steps | `docs/` only | ✅ Yes, no code conflicts |
-| **D. SMS texting** | `messages` table and opt-out flag; `sendSms` / `getMessageThread` / channel preference in the data layer; SMS thread on referral detail; SMS rows in the call log; channel setting; inbound reply webhook; AWS End User Messaging adapter (mocked first); AI replies via Bedrock; captured slots go to the MA confirm queue; quiet hours and attempt limits | `data.ts`, `types.ts`, referral detail, calls, settings, new API route | ⏳ After **A** is merged |
+| **D. SMS texting** | `messages` table and opt-out flag; `sendSms` / `getMessageThread` / channel preference in the data layer; SMS thread on referral detail; SMS rows in the Messages log; channel setting; inbound reply webhook; AWS End User Messaging adapter (mocked first); AI replies via Bedrock; captured slots go to the MA confirm queue; quiet hours and attempt limits | `data.ts`, `types.ts`, referral detail, calls, settings, new API route | ⏳ After **A** is merged |
 | **E. eCW CSV import** | Upload screen; column mapping; match patients to referrals; auto-mark **Booked**; cancellations re-enter outreach; review list for unmatched rows | new import screen, `data.ts`, `types.ts`, Sidebar | ✅ **Built** (`/schedule-import`, see `relay-app/README.md`); confirm the column mapping once a real eCW export is available |
 | **F. AWS Deployment** | Beginner step-by-step setup guide; ECS Fargate hosting (Dockerfile + CDK in `infra/`); RDS; Cognito; secrets in Secrets Manager; HTTPS and domain; backups; billing alarms; log retention; installable browser app (PWA) | new config files, `next.config.ts`, `public/`, `docs/` | ⏳ After **A** is merged and the AWS account exists |
 
@@ -165,7 +165,7 @@ Guide: **`docs/AWS_DEPLOYMENT_GUIDE.md`** Parts 5–7. Compliance check: **`docs
 | ⬜ | Read conversations weekly for the first month | Fix scripts as you learn |
 | ⬜ | 15-minute weekly check-in with the clinic | |
 | ⬜ | Track bookings against the baseline, and AWS costs | |
-| ⬜ | End-of-pilot review | Continue, expand, add voice, or add the eCW live feed? |
+| ⬜ | End-of-pilot review | Continue, expand, or add the eCW live feed? |
 
 ---
 
@@ -173,7 +173,6 @@ Guide: **`docs/AWS_DEPLOYMENT_GUIDE.md`** Parts 5–7. Compliance check: **`docs
 
 | Item | Options |
 |---|---|
-| **Voice calls** | BAAs with ElevenLabs + Twilio, or move to Amazon Connect (stays under the AWS BAA) |
 | **eCW live schedule** | HL7 SIU feed or eCW API |
 | **Open-slot availability from eCW** | Depends on what eCW exposes |
 | **Compliance tools** | Vanta or Drata, if offering Relay to more clinics |

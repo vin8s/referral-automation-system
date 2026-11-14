@@ -12,8 +12,11 @@ export type ReferralState =
   | 'Escalated';
 
 export type Priority = 'urgent' | 'normal';
-export type Channel = 'voice' | 'sms';
-export type CallOutcome =
+/**
+ * Outcome of one text-outreach attempt (stored in call_attempts.outcome; the
+ * table keeps its historical name). Display labels: outcomeLabel() in format.ts.
+ */
+export type OutreachOutcome =
   | 'No Answer'
   | 'Voicemail Left'
   | 'Call Back Requested'
@@ -33,13 +36,11 @@ export interface TranscriptTurn {
   text: string;
 }
 
+/** One text-outreach attempt (Relay is SMS-only). */
 export interface Attempt {
   n: number;
   timestamp: string;
-  channel: Channel;
-  outcome: CallOutcome;
-  duration: string;
-  disclosurePlayed: boolean;
+  outcome: OutreachOutcome;
   summary: string;
   transcript: TranscriptTurn[];
   slotDay?: string;
@@ -117,36 +118,41 @@ export interface ConfirmQueueItem {
   capturedAgoMin: number | null;
   priority: Priority;
   summary: string;
-  transcript: TranscriptTurn[];
-  /** Channel of the latest attempt: SMS-captured slots show the text thread instead of a call transcript. */
-  channel?: Channel;
-  /** Last few SMS messages (SMS-captured slots only). */
+  /** Last few SMS messages of the thread. */
   smsExcerpt?: SmsMessage[];
 }
 
-export interface UrgentAlert {
+/** Red Escalated referral (safety). Never merged with amber NeedsHumanItem. */
+export interface EscalationItem {
   referralId: string;
   patient: string;
   reason: string;
   severity: 'high' | 'med' | 'low';
   raisedAt: string;
   owner: string | null;
-  transcriptExcerpt: TranscriptTurn[];
+  /** Last two turns of the text conversation that triggered it. */
+  excerpt: TranscriptTurn[];
 }
 
-export interface CallLogEntry {
+/**
+ * The MA's single work list (/action), top to bottom:
+ * red escalations → amber "needs a human" items → slots to confirm.
+ */
+export interface ConfirmQueue {
+  escalations: EscalationItem[];
+  needsHuman: NeedsHumanItem[];
+  slots: ConfirmQueueItem[];
+}
+
+export interface OutreachLogEntry {
   referralId: string;
   patient: string;
   language: string;
   timestamp: string;
   attempt: number;
-  channel: Channel;
-  outcome: CallOutcome;
-  duration: string;
+  outcome: OutreachOutcome;
   summary: string;
-  hasTranscript: boolean;
   escalated: boolean;
-  disclosurePlayed: boolean;
   referralState: ReferralState;
 }
 
@@ -168,33 +174,6 @@ export interface PipelineCount {
   count: number;
 }
 
-export interface FunnelStep {
-  stage: string;
-  count: number;
-}
-
-export interface Analytics {
-  dateRange: string;
-  funnel: FunnelStep[];
-  conversionLift: { baselinePct: number; currentPct: number; deltaPct: number };
-  recoveredRevenue: { amount: number; currency: string; basis: string };
-  backlogReactivation: { deadReferralsRun: number; recoveredVisits: number; revenue: number };
-  leakageByStage: { stage: string; lostPct: number; topSource: string }[];
-  shadowFidelity: {
-    currentPct: number;
-    trend: number[];
-    threshold: number;
-    status: 'below_threshold' | 'migration_ready';
-    note: string;
-  };
-  compliance: {
-    aiDisclosureRate: number;
-    quietHourAdherence: number;
-    optOutsHonored: number;
-    voicemailPhiMinimized: number;
-  };
-}
-
 export interface Org {
   productName: string;
   practiceName: string;
@@ -213,14 +192,6 @@ export interface CurrentUser {
   id?: string;
   /** Machine role used for permissions. */
   roleKey?: 'ma' | 'admin';
-  /** Server feature flag: outbound voice calls allowed (VOICE_ENABLED). */
-  voiceEnabled?: boolean;
-}
-
-export interface DashboardCallActivity {
-  window: string;
-  avgTimeToFirstAttemptMin: number;
-  metrics: DashboardCallMetric[];
 }
 
 /** Read-only practice configuration shown on the Settings screen. */
@@ -232,87 +203,18 @@ export interface RawSettings {
   practiceProfile: { specialty: string; providers: string[]; locations: string[]; languages: string[] };
 }
 
-export interface DashboardCallMetric {
-  label: string;
-  value: number;
-  delta?: string;
-  deltaDir?: 'up' | 'down';
-  sub?: string;
-  spark?: number[];
-  cardDelta?: string;
-}
-
-export interface DashboardFunnelStep {
-  label: string;
-  n: number;
-  conv: number | null;
-}
-
-export interface DashboardHealthSignals {
-  status: 'normal' | 'degraded' | 'down';
-  disclosureRatePct: number;
-  quietHoursAdherencePct: number;
-  avgTimeToFirstAttemptMin: number;
-  escalationsTriggered: number;
-  shadowCalendarFidelityPct: number;
-  optOutsHonored: number;
-}
-
-// ── ElevenLabs Conversational AI call types ───────────────────────────────────
-export interface ElevenLabsTranscriptTurn {
-  role: 'agent' | 'user';
-  message: string;
-  time_in_call_secs?: number;
-}
-
 export interface ReferralLogEntry {
   referralId: string;
   patient: string;
   at: string;
-  type: 'ai_call' | 'manual_update' | 'system';
+  type: 'outreach' | 'manual_update' | 'system';
   who: string;
   what: string;
   referralState?: ReferralState;
   detail?: string;
-  channel?: Channel;
   outcome?: string;
-  duration?: string;
-  disclosurePlayed?: boolean;
   escalated?: boolean;
-  hasTranscript?: boolean;
   attempt?: number;
-}
-
-export type CallOrderMode =
-  | 'chronological'    // oldest referral first (FIFO), uncontacted only
-  | 'urgent_first'     // urgent priority first, then chronological
-  | 'all'              // chronological, all patients regardless of attempt count
-  | 'fewest_attempts'; // least-attempted patients first
-
-export interface CadenceConfig {
-  intervalMinutes: number;
-  maxCallsPerSession: number;
-  callOrder: CallOrderMode;
-}
-
-export interface PracticeSettings {
-  cadence: CadenceConfig;
-}
-
-export interface ElevenLabsCallResult {
-  conversation_id: string;
-  status: 'processing' | 'done' | 'failed';
-  transcript?: ElevenLabsTranscriptTurn[];
-  metadata?: {
-    call_duration_secs?: number;
-    start_time_unix_secs?: number;
-    termination_reason?: string;
-  };
-  analysis?: {
-    call_successful?: 'success' | 'failure' | 'unknown';
-    transcript_summary?: string;
-    data_collection_results?: Record<string, { value: unknown; rationale: string }>;
-  };
 }
 
 // ── SMS texting (pilot channel) ───────────────────────────────────────────────
@@ -349,7 +251,8 @@ export interface NeedsHumanItem {
   raisedAt: string;
 }
 
-export type SmsChannelPreference = 'sms' | 'voice' | 'none';
+/** 'sms' = automated texting allowed; 'none' = staff contact only (no automated texts). */
+export type SmsChannelPreference = 'sms' | 'none';
 
 export interface SmsThread {
   referralId: string;

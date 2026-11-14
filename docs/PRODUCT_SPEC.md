@@ -1,5 +1,7 @@
 # PRODUCT_SPEC.md
 
+> **As of 2026-11-14 Relay is SMS-only; voice outreach was removed.** Where this document describes AI phone calls, voicemail, call transcripts or a voice agent, treat it as historical; the texting assistant, the Confirm queue (red Escalated → amber needs a human → slots to confirm) and the Messages log replace them.
+
 **Voice AI Referral Conversion Platform**
 Single engineering source of truth. Consolidates the product thesis, scope boundary, architecture, data model, state machines, UI surface, and build order. If this file disagrees with older documents, this file wins.
 

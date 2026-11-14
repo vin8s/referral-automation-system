@@ -267,14 +267,11 @@ export async function capturedSlotOf(referralId: string): Promise<{ day: string;
   return rows[0] ?? null;
 }
 
-/** Adds the SMS channel + thread excerpt to confirm-queue cards whose latest attempt was a text. */
+/** Adds the latest text-thread excerpt to each confirm-queue card. */
 export async function withSmsExcerpts(items: ConfirmQueueItem[]): Promise<ConfirmQueueItem[]> {
   const db = await getDb();
-  const channels = await repo.latestAttemptChannels(db, items.map(i => i.referralId));
   return Promise.all(items.map(async item => {
-    const channel = channels.get(item.referralId) === 'sms' ? 'sms' as const : 'voice' as const;
-    if (channel !== 'sms') return { ...item, channel };
     const msgs = (await repo.listMessages(db, item.referralId, { limit: 6 })).filter(m => m.status !== 'suppressed');
-    return { ...item, channel, smsExcerpt: msgs.map(toMessage) };
+    return { ...item, smsExcerpt: msgs.map(toMessage) };
   }));
 }

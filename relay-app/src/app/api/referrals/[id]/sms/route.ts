@@ -34,7 +34,7 @@ export const POST = withAuth(async (req, { params }: Ctx, user) => {
   }
 });
 
-const CHANNELS: SmsChannelPreference[] = ['sms', 'voice', 'none'];
+const CHANNELS: SmsChannelPreference[] = ['sms', 'none'];
 
 export const PATCH = withAuth(async (req, { params }: Ctx, user) => {
   const { id } = await params;
@@ -44,7 +44,7 @@ export const PATCH = withAuth(async (req, { params }: Ctx, user) => {
   if (b.paused !== undefined && typeof b.paused !== 'boolean') return jsonError(400, 'paused must be boolean');
   if (b.consent !== undefined && typeof b.consent !== 'boolean') return jsonError(400, 'consent must be boolean');
   if (b.channelPreference !== undefined && !CHANNELS.includes(b.channelPreference as SmsChannelPreference)) {
-    return jsonError(400, 'channelPreference must be sms, voice or none');
+    return jsonError(400, 'channelPreference must be sms or none');
   }
   try {
     const ok = await updateSmsPreferences(id, {

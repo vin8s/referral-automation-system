@@ -1,6 +1,7 @@
 # Relay app
 
-Staff console for converting specialist referrals into booked appointments.
+Staff console for converting specialist referrals into booked appointments through an
+automated **SMS** scheduling assistant (Relay is SMS-only; voice outreach was removed on 2026-11-14).
 Next.js 16 (App Router) + Postgres. **Run it locally:** see
 [`docs/LOCAL_DEV_SETUP.md`](../docs/LOCAL_DEV_SETUP.md) (`npm install && npm run dev`, no database install needed).
 
@@ -20,13 +21,12 @@ src/app/(app)/layout.tsx         re-checks the session, renders the shell
 |---|---|
 | `db/migrations/NNN_name.sql` | Plain-SQL migrations, applied in order (`npm run db:migrate`; auto in dev) |
 | `src/server/db/seed.ts` | Fake seed data, derived from `src/lib/mockData.ts` |
-| `src/server/referrals.ts` | Referral/attempt/appointment/settings queries + audit log |
+| `src/server/referrals.ts` | Referral / text-attempt / appointment queries, confirm queue, escalations + audit log |
 | `src/server/auth/` | Session cookie (jose), Cognito OIDC (openid-client), `withAuth`, `requireUser` |
-| `src/server/config.ts` | Feature flags (`VOICE_ENABLED`) |
 | `src/server/log.ts` | `logError()`: logs error class/code only, never patient data |
-| `src/contexts/SessionContext.tsx` | `useSession()` → `{ user, isAdmin, voiceEnabled }` in client components |
+| `src/contexts/SessionContext.tsx` | `useSession()` → `{ user, isAdmin }` in client components |
 | `src/server/sms/` | SMS texting pilot (see below) |
-| `src/lib/slots.ts` | Shared slot availability grid + conflict keys (voice and SMS) |
+| `src/lib/slots.ts` | Shared slot availability grid + conflict keys (SMS agent, eCW import) |
 | `test/` | `npm test` (vitest): SMS guards, scheduling, SNS verification, engine scenarios on in-memory Postgres |
 | `.env.example` | Every environment variable, documented |
 
@@ -43,6 +43,25 @@ src/app/(app)/layout.tsx         re-checks the session, renders the shell
 
 Rules: no patient data in `console.*`; fake data only until the BAA is signed;
 roles are `ma` and `admin` (settings changes are admin-only).
+
+## Screens
+
+| Sidebar | Route | What it is |
+|---|---|---|
+| Dashboard | `/dashboard` | Red escalation + amber needs-a-human strips, slots to confirm, recent texting outreach, recent referrals, upcoming appointments |
+| Confirm queue | `/action` | The MA's single work list, top to bottom: **red Escalated** (claim / resolve), **amber Needs a human** (mark handled), **Slots to confirm** (confirm / reject). One API: `GET /api/confirm-queue` → `{ escalations, needsHuman, slots }`. Deep links `#escalated`, `#needs-human`, `#slots`. Old `/alerts` redirects here. |
+| Referrals | `/referrals`, `/referrals/:id` | List + detail (text thread, consent, outreach timeline) |
+| Messages log | `/messages` | Every text-outreach attempt, manual edit and system event. Old `/calls` redirects here. |
+| Calendar | `/calendar` | Read-only mirror of confirmed bookings |
+| Ingest referrals | `/ingest` | Spreadsheet upload (parse → review → import) or one referral entered by hand. SMS consent is recorded explicitly per patient (spreadsheet `SMS Consent` = yes, or the manual-entry checkbox + source); otherwise it stays off and nobody is texted. |
+| eCW import | `/schedule-import` | eCW appointment report upload (see below) |
+| Settings | `/settings` | Texting (SMS) settings, compliance, escalation rules, practice profile |
+
+Sidebar badge on **Confirm queue**: red = open escalations, amber = needs-a-human items, neutral = slots.
+
+**`call_attempts`** keeps its historical table name: it now holds one row per **text-outreach** attempt
+(`channel = 'sms'`). `db/migrations/004_sms_only.sql` (2026-11-14) sets the default channel to `sms` and maps the
+retired `voice` channel preference to `none`; any old voice rows stay in the table but are never read or shown.
 
 ## SMS texting (pilot channel)
 
@@ -118,7 +137,7 @@ duplicated and rows staff ignored stay ignored; a draft can be applied once).
 
 **Taken times:** scheduled/arrived rows for the chosen providers (default: providers seeing referral patients in
 the file) are stored in `ecw_busy_slots` **without patient identity** and replace the covered date range on each
-import. `sms/repo.takenSlots()` (SMS agent) and `data.getBookedSlotKeys()` (voice) treat any grid time that
+import. `sms/repo.takenSlots()` (SMS agent, also `GET /api/schedule-import/taken-slots`) treats any grid time that
 overlaps them (`SLOT_LENGTH_MIN` = 30) as taken.
 
 **What is kept:** the raw file is never stored. Parsed cells live on the draft only until it is applied,

@@ -10,7 +10,6 @@ import { EmptyState } from '@/components/shared/EmptyState';
 import { StatePill } from '@/components/shared/StatePill';
 import { getReferrals } from '@/lib/data';
 import { StatePicker } from '@/components/shared/StatePicker';
-import { RunQueueButton } from '@/components/shared/VoiceOff';
 import type { Referral, ReferralState } from '@/lib/types';
 
 function exportReferrals(rows: Referral[], label: string) {
@@ -29,7 +28,7 @@ function exportReferrals(rows: Referral[], label: string) {
     'State':               r.state,
     'Referral Time':       r.referralTime,
     'Location':            r.location,
-    'Attempts':            r.attempts.length,
+    'Outreach texts':      r.attempts.length,
     'Last Summary':        r.attempts[r.attempts.length - 1]?.summary ?? '',
   }));
   const ws = xlsxUtils.json_to_sheet(data);
@@ -263,7 +262,6 @@ export default function ReferralsPage() {
   return (
     <>
       <PageHead title="Referrals" sub={`${filtered.length} of ${active.length} active referrals`}>
-        <RunQueueButton />
         <button
           className="btn btn-sm"
           onClick={() => exportReferrals(filtered, stateFilter === 'all' ? 'all' : stateFilter.toLowerCase().replace(/ /g, '-'))}

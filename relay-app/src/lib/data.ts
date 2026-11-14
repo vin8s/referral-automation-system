@@ -8,19 +8,15 @@
 // Function names and signatures are stable: screens should not need to change
 // when the server internals do.
 
-import { normalizeTime } from './format';
-import { takenSlotKeys } from './slots';
 import type {
-  Referral, ReferralState, Attempt, ConfirmQueueItem, UrgentAlert,
-  CallLogEntry, CalendarEvent, PipelineCount, Analytics,
-  Org, CurrentUser, DashboardFunnelStep, DashboardHealthSignals,
-  Priority, ReferralLogEntry, PracticeSettings, DashboardCallActivity, RawSettings,
+  Referral, ReferralState, ConfirmQueue,
+  OutreachLogEntry, CalendarEvent, PipelineCount,
+  Org, CurrentUser,
+  Priority, ReferralLogEntry, RawSettings,
   SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, OutreachTickResult,
   EcwImportOverview, EcwImportStatus, EcwImportDraft, EcwApplyResult, EcwImportDetail,
 } from './types';
 import type { EcwImportOptions, EcwMapping } from './ecwImport';
-
-export { normalizeTime };
 
 // ── HTTP helper ──────────────────────────────────────────────────────────────
 
@@ -67,21 +63,9 @@ export async function getOrg(): Promise<Org> {
   return api<Org>('/org');
 }
 
-/** The signed-in staff member (name, role) plus the voiceEnabled feature flag. */
+/** The signed-in staff member (name, role). */
 export async function getCurrentUser(): Promise<CurrentUser> {
   return api<CurrentUser>('/me');
-}
-
-// ── Booked slot keys ─────────────────────────────────────────────────────────
-// Returns a Set of "DDD Mon D|H:MM AM" keys for all captured + confirmed slots.
-// Used by callUtils to filter already-booked times out of the available_slots list.
-// Includes times already taken in eCW (from the last schedule import), the same list the SMS agent uses.
-export async function getBookedSlotKeys(): Promise<Set<string>> {
-  const [referrals, taken] = await Promise.all([
-    getReferrals(),
-    api<{ day: string; time: string }[]>('/schedule-import/taken-slots').catch(() => []),
-  ]);
-  return takenSlotKeys([...referrals.flatMap(r => [r.capturedSlot, r.bookedAppointment]), ...taken]);
 }
 
 // ── Referrals ────────────────────────────────────────────────────────────────
@@ -104,10 +88,14 @@ export async function getReferralsInMotion(): Promise<Referral[]> {
   return getReferrals();
 }
 
-// ── Confirm queue ────────────────────────────────────────────────────────────
+// ── Confirm queue (the MA's single work list) ───────────────────────────────
 
-export async function getConfirmQueue(): Promise<ConfirmQueueItem[]> {
-  return api<ConfirmQueueItem[]>('/confirm-queue');
+/**
+ * Everything waiting on a human, in priority order: red escalations (safety),
+ * amber "needs a human" items, then AI-captured slots to confirm.
+ */
+export async function getConfirmQueue(): Promise<ConfirmQueue> {
+  return api<ConfirmQueue>('/confirm-queue');
 }
 
 /** MA confirms an AI-captured slot they have booked in the practice system. */
@@ -119,21 +107,15 @@ export async function rejectSlot(referralId: string): Promise<{ success: boolean
   return mutate(`${ref(referralId)}/reject`, 'POST');
 }
 
-// ── Urgent alerts ────────────────────────────────────────────────────────────
-
-export async function getUrgentAlerts(): Promise<UrgentAlert[]> {
-  return api<UrgentAlert[]>('/alerts');
-}
-
-/** The server records the signed-in user as owner; ownerName is kept for API compatibility. */
-export async function claimAlert(referralId: string, _ownerName?: string): Promise<{ success: boolean }> {
+/** Claim a red escalation: the server records the signed-in user as owner. */
+export async function claimEscalation(referralId: string): Promise<{ success: boolean }> {
   return mutate(`${ref(referralId)}/claim`, 'POST');
 }
 
-// ── Call log ─────────────────────────────────────────────────────────────────
+// ── Outreach log (text attempts) ─────────────────────────────────────────────
 
-export async function getCallLog(): Promise<CallLogEntry[]> {
-  return api<CallLogEntry[]>('/call-log');
+export async function getOutreachLog(): Promise<OutreachLogEntry[]> {
+  return api<OutreachLogEntry[]>('/outreach-log');
 }
 
 // ── Calendar (read-only mirror + edits to confirmed appointments) ────────────
@@ -153,38 +135,23 @@ export async function deleteCalendarEvent(referralId: string): Promise<{ success
   return mutate(`${ref(referralId)}/appointment`, 'DELETE');
 }
 
-// ── Pipeline / analytics ─────────────────────────────────────────────────────
+// ── Pipeline ─────────────────────────────────────────────────────────────────
 
 export async function getPipeline(): Promise<PipelineCount[]> {
   return api<PipelineCount[]>('/pipeline');
 }
 
-export async function getAnalytics(): Promise<Analytics> {
-  return api<Analytics>('/analytics');
-}
-
-export async function getDashboardCallActivity(): Promise<DashboardCallActivity> {
-  return api<DashboardCallActivity>('/dashboard/call-activity');
-}
-
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-export async function getSettings(): Promise<PracticeSettings> {
-  return api<PracticeSettings>('/settings');
-}
-
-/** Admin only. Throws ApiError (status 403) for non-admins. */
-export async function saveSettings(s: PracticeSettings): Promise<void> {
-  await api<PracticeSettings>('/settings', { method: 'PUT', body: s });
-}
-
+/** Read-only outreach policy and practice profile. */
 export async function getRawSettings(): Promise<RawSettings> {
   return api<RawSettings>('/settings/defaults');
 }
 
 // ── Sidebar counts ───────────────────────────────────────────────────────────
 
-export async function getSidebarCounts(): Promise<{ urgentAlerts: number; confirmQueue: number; referrals: number }> {
+/** escalations = red (safety), needsHuman = amber, confirmQueue = slots to confirm. */
+export async function getSidebarCounts(): Promise<{ escalations: number; needsHuman: number; confirmQueue: number; referrals: number }> {
   return api('/sidebar-counts');
 }
 
@@ -195,28 +162,6 @@ export async function updateReferralState(
   newState: ReferralState,
 ): Promise<{ success: boolean }> {
   return mutate(`${ref(referralId)}/state`, 'PUT', { state: newState });
-}
-
-export async function createCapturedSlot(
-  referralId: string,
-  slot: { day: string; time: string; provider: string },
-): Promise<{ success: boolean }> {
-  return mutate(`${ref(referralId)}/captured-slot`, 'POST', { slot });
-}
-
-export async function addCallAttempt(
-  referralId: string,
-  attempt: Omit<Attempt, 'n'>,
-): Promise<{ success: boolean; errorMsg?: string }> {
-  return mutate(`${ref(referralId)}/attempts`, 'POST', { attempt });
-}
-
-// Updates the most recently inserted call attempt for a referral with a late-arriving transcript.
-export async function patchLatestTranscript(
-  referralId: string,
-  turns: { who: 'ai' | 'patient'; text: string }[],
-): Promise<void> {
-  await mutate(`${ref(referralId)}/attempts/latest`, 'PATCH', { turns });
 }
 
 export async function updateReferral(
@@ -249,15 +194,20 @@ export interface IngestReferralInput {
   referringProvider?: string;
   priority?: Priority;
   location?: string;
+  /** Only an explicit true records SMS consent. Never default this to true. */
+  smsConsent?: boolean;
+  /** Where consent was obtained (intake form, verbal at front desk, …). */
+  smsConsentSource?: string;
 }
 
 export async function ingestReferrals(
   rows: IngestReferralInput[],
-): Promise<{ success: boolean; importedCount: number }> {
+  via: 'upload' | 'manual' = 'upload',
+): Promise<{ success: boolean; importedCount: number; consentedCount: number }> {
   try {
-    return await api('/referrals', { method: 'POST', body: { rows } });
+    return await api('/referrals', { method: 'POST', body: { rows, via } });
   } catch {
-    return { success: false, importedCount: 0 };
+    return { success: false, importedCount: 0, consentedCount: 0 };
   }
 }
 
@@ -265,16 +215,6 @@ export async function ingestReferrals(
 
 export async function getReferralLog(): Promise<ReferralLogEntry[]> {
   return api<ReferralLogEntry[]>('/referral-log');
-}
-
-// ── Dashboard ────────────────────────────────────────────────────────────────
-
-export async function getDashboardFunnel(): Promise<DashboardFunnelStep[]> {
-  return api<DashboardFunnelStep[]>('/dashboard/funnel');
-}
-
-export async function getDashboardHealthSignals(): Promise<DashboardHealthSignals> {
-  return api<DashboardHealthSignals>('/dashboard/health');
 }
 
 // ── SMS texting ──────────────────────────────────────────────────────────────
