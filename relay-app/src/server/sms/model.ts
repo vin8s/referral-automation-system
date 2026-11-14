@@ -140,6 +140,20 @@ export class MockSmsAgentModel implements SmsAgentModel {
       return out;
     }
     if (/\bnone\b|\bninguno\b|\bno (me )?sirve\b|\bdont work\b/.test(t)) {
+      const more = ctx.more_open_slots ?? [];
+      if (more.length) {
+        // Suggest other open times, preferring a weekday the patient named.
+        const days = DAY_NAMES.filter(([re]) => re.test(t)).map(([, d]) => d);
+        const dayOf = (label: string) => ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(label.slice(0, 3).toLowerCase());
+        const fit = days.length ? more.filter(s => days.includes(dayOf(s.label_en))) : [];
+        const pickList = (fit.length ? fit : more).slice(0, 3);
+        const es = out.language === 'es';
+        out.intent = 'availability_preference';
+        out.reply_text = (es ? 'Entiendo. Tambien tenemos:\n' : 'No problem. We also have:\n')
+          + pickList.map((s, i) => `${i + 1}) ${es ? s.label_es : s.label_en}`).join('\n')
+          + (es ? '\nResponda 1, 2 o 3.' : '\nReply 1, 2 or 3.');
+        return out;
+      }
       out.intent = 'no_slot_works';
       return amber('no_slot_works', true, 'None of the offered times work for the patient.', null);
     }

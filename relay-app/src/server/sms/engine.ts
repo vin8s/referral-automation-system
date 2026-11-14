@@ -21,7 +21,7 @@ import { measureSms } from './segments';
 import * as repo from './repo';
 import { AI_ACTOR, SYSTEM_ACTOR, type AuditActor, type Conv, type RefCtx } from './repo';
 import { ageOn, isWithinSendWindow, localDate, nextSendWindow, zonedParts, type OutreachSettings } from './schedule';
-import { buildOfferedSlots } from './slots';
+import { buildOfferedSlots, buildOpenSlotPool } from './slots';
 import { IMMEDIATE_TEMPLATES, renderTemplate, type Lang, type TemplateId, type TemplateVars } from './templates';
 import type { HistoryTurn, OfferedSlot, RedCode, SmsTurnOutput, TurnContext } from './types';
 
@@ -76,6 +76,15 @@ async function freshSlots(d: SmsDeps, q: Queryable, conv: Conv): Promise<Offered
   return buildOfferedSlots({
     now: d.now(), tz: d.tz, takenKeys: taken, excludeKeys: new Set(conv.rejectedSlotKeys), providers: d.providers,
   });
+}
+
+/** Other free times (next 10 weekdays) the AI may suggest when the offered ones don't work. */
+async function openSlotPool(d: SmsDeps, q: Queryable, conv: Conv): Promise<OfferedSlot[]> {
+  const taken = takenSlotKeys(await repo.takenSlots(q));
+  const offered = new Set(conv.offeredSlots.map(s => s.slot_id));
+  return buildOpenSlotPool({
+    now: d.now(), tz: d.tz, takenKeys: taken, excludeKeys: new Set(conv.rejectedSlotKeys), providers: d.providers,
+  }).filter(s => !offered.has(s.slot_id));
 }
 
 async function raiseAmber(d: SmsDeps, ref: RefCtx, code: string, summary: string | null, pause: boolean, actor: AuditActor = AI_ACTOR) {
@@ -306,7 +315,8 @@ export async function handleInbound(d: SmsDeps, input: InboundInput): Promise<In
   }
 
   // 6. Model turn
-  const context = await buildTurnContext(d, ref, conv, isNewConversation, aiToday);
+  const pool = conv.identityVerified && !safetyOnly ? await openSlotPool(d, q, conv) : [];
+  const context = await buildTurnContext(d, ref, conv, isNewConversation, aiToday, pool);
   const history = await buildHistory(d, ref.id, msgId);
   let out: SmsTurnOutput | null = null;
   let modelError: string | null = null;
@@ -335,7 +345,7 @@ export async function handleInbound(d: SmsDeps, input: InboundInput): Promise<In
     return { referralId: ref.id, outcome: 'amber agent_error' };
   }
 
-  return applyTurn(d, ref, conv, out, { backstop, quote, safetyOnly, lang, aiToday, today, body: input.body });
+  return applyTurn(d, ref, conv, out, { backstop, quote, safetyOnly, lang, aiToday, today, body: input.body, pool });
 }
 
 async function handleKeyword(
@@ -365,7 +375,7 @@ async function handleKeyword(
   return { referralId: ref.id, outcome: 'opted back in' };
 }
 
-async function buildTurnContext(d: SmsDeps, ref: RefCtx, conv: Conv, isNew: boolean, aiToday: number): Promise<TurnContext> {
+async function buildTurnContext(d: SmsDeps, ref: RefCtx, conv: Conv, isNew: boolean, aiToday: number, pool: OfferedSlot[] = []): Promise<TurnContext> {
   const now = d.now();
   const verified = conv.identityVerified;
   const booked = verified ? await repo.confirmedAppointment(d.db, ref.id) : null;
@@ -388,6 +398,7 @@ async function buildTurnContext(d: SmsDeps, ref: RefCtx, conv: Conv, isNew: bool
     offered_slots: verified
       ? conv.offeredSlots.map(s => ({ slot_id: s.slot_id, start: s.start, provider: s.provider, label_en: s.label_en, label_es: s.label_es }))
       : [],
+    more_open_slots: verified ? pool.map(s => ({ slot_id: s.slot_id, label_en: s.label_en, label_es: s.label_es })) : [],
     captured_slot_id: conv.capturedSlotId,
     booked_appointment: booked ? { label: `${booked.day} at ${booked.time}` } : null,
     redirects_used: conv.redirectsUsed,
@@ -411,12 +422,14 @@ interface TurnState {
   aiToday: number;
   today: string;
   body: string;
+  /** more_open_slots shown to the model this turn (may be captured or named in a reply). */
+  pool: OfferedSlot[];
 }
 
 async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput, st: TurnState): Promise<InboundResult> {
   const q = d.db;
   const decision = resolveDecision(out, {
-    backstop: st.backstop, identityVerified: conv.identityVerified, offeredSlotIds: conv.offeredSlots.map(s => s.slot_id),
+    backstop: st.backstop, identityVerified: conv.identityVerified, offeredSlotIds: [...conv.offeredSlots, ...st.pool].map(s => s.slot_id),
   });
   const summary = out.escalation.staff_summary ?? null;
 
@@ -484,7 +497,7 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
       await raiseAmber(d, ref, decision.code, summary, decision.pause);
       if (out.call_outcome) await repo.setSmsAttemptOutcome(q, ref.id, out.call_outcome);
       else if (decision.pause) await repo.setSmsAttemptOutcome(q, ref.id, 'Transferred to Staff');
-      if (decision.alsoCapture) return captureStep(d, ref, conv, decision.alsoCapture, lang);
+      if (decision.alsoCapture) return captureStep(d, ref, conv, decision.alsoCapture, lang, st.pool);
       if (decision.code === 'language_barrier') {
         await sendTemplate(d, ref, 'language_barrier', lang);
       } else if (decision.template) {
@@ -496,7 +509,7 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
     }
 
     case 'captured':
-      return captureStep(d, ref, conv, decision.slotId, lang);
+      return captureStep(d, ref, conv, decision.slotId, lang, st.pool);
 
     case 'reply':
       if (decision.template) await sendModelTemplate(d, ref, conv, decision.template, lang);
@@ -525,7 +538,7 @@ async function sendModelTemplate(d: SmsDeps, ref: RefCtx, conv: Conv, template: 
 async function sendAiReply(d: SmsDeps, ref: RefCtx, conv: Conv, text: string, st: TurnState) {
   const problems = validateOutgoing(text, {
     clinicPhone: d.clinicPhone, dobIso: ref.dobIso, sensitiveText: `${ref.reason} ${d.specialty}`,
-    offeredSlots: conv.offeredSlots, identityVerified: conv.identityVerified,
+    offeredSlots: [...conv.offeredSlots, ...st.pool], identityVerified: conv.identityVerified,
   });
   if (problems.length) {
     await raiseAmber(d, ref, 'agent_error', `AI reply blocked by the outbound guard: ${problems.join(', ')}.`, true);
@@ -570,9 +583,15 @@ async function identityStep(d: SmsDeps, ref: RefCtx, conv: Conv, candidate: stri
   return { referralId: ref.id, outcome: 'identity retry' };
 }
 
-async function captureStep(d: SmsDeps, ref: RefCtx, conv: Conv, slotId: string, lang: Lang): Promise<InboundResult> {
+async function captureStep(d: SmsDeps, ref: RefCtx, conv: Conv, slotId: string, lang: Lang, pool: OfferedSlot[] = []): Promise<InboundResult> {
   const q = d.db;
-  const slot = conv.offeredSlots.find(s => s.slot_id === slotId)!;
+  const offered = conv.offeredSlots.find(s => s.slot_id === slotId);
+  const slot = offered ?? pool.find(s => s.slot_id === slotId)!;
+  if (!offered) {
+    // Picked from the wider pool the AI suggested: keep it with the offered slots (labels, rebooking).
+    conv.offeredSlots = [...conv.offeredSlots, slot];
+    await repo.updateConv(q, ref.id, { offeredSlots: conv.offeredSlots });
+  }
   if (ref.state === 'Booked') {
     await raiseAmber(d, ref, 'appointment_change', 'Patient with a Booked appointment picked a new time by text.', true);
     await sendTemplate(d, ref, 'human_handoff', lang);

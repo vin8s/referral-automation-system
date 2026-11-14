@@ -84,6 +84,45 @@ describe('outreach + happy path (case 1)', () => {
   });
 });
 
+describe('none of the offered times work', () => {
+  it('the AI sees more open times, suggests them, and can capture one without a staff handoff', async () => {
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    await verify(h);
+    let alt: { slot_id: string; label_en: string } | undefined;
+    h.model.script = input => {
+      const more = input.context.more_open_slots ?? [];
+      const offeredIds = new Set(input.context.offered_slots.map(s => s.slot_id));
+      expect(more.length).toBeGreaterThan(10);
+      expect(more.some(s => offeredIds.has(s.slot_id))).toBe(false);
+      alt = more.find(s => s.label_en.startsWith('Thu'))!;
+      return turn({ intent: 'availability_preference', reply_text: `We don't have evening times. How about 1) ${alt.label_en}?` });
+    };
+    await say(h, "None work, I'm available Thursdays at 6:00");
+    expect(h.provider.sent.at(-1)!.body).toContain(alt!.label_en);
+    expect(await openAmber(db, ref)).toEqual([]);
+
+    h.model.script = () => turn({
+      intent: 'slot_selected', use_template: 'slot_captured', call_outcome: 'Appointment Accepted',
+      captured_slot: { slot_id: alt!.slot_id, patient_text: '1' },
+    });
+    await say(h, '1');
+    expect((await templates()).at(-1)).toBe('slot_captured');
+    expect(h.provider.sent.at(-1)!.body).toContain(alt!.label_en);
+    expect(await referralState(db, ref)).toBe('Pending Confirmation');
+  });
+
+  it('the mock AI suggests other times instead of handing off', async () => {
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    await verify(h);
+    h.model.script = (input) => new MockSmsAgentModel().turn(input);
+    await say(h, 'none work, thursday is best');
+    expect(h.provider.sent.at(-1)!.body).toMatch(/We also have:\n1\) Thu/);
+    expect(await openAmber(db, ref)).toEqual([]);
+  });
+});
+
 describe('identity (case 11) [BLOCKER]', () => {
   it('two wrong DOBs → identity_not_verified + amber identity_failed, no details shared', async () => {
     const h = harness(db, () => turn({ intent: 'identity_response', identity: { dob_candidate: '1990-01-01', says_not_patient: false, says_is_proxy: false } }));

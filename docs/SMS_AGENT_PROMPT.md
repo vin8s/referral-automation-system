@@ -43,7 +43,7 @@ Do **not** put these in the prompt, turn context or history: `referral_reason`, 
 2. `opt_out = true` → send `stop_confirmation`, record opt-out, stop all texting.
 3. `wrong_number = true` → send `wrong_number`, suppress number, amber.
 4. `escalation.tier = "amber"` → create the needs-a-human item; send `use_template` if set, otherwise `reply_text`; pause per `pause_automation`.
-5. `captured_slot` set **and** `identity_verified = true` **and** `slot_id` is in `offered_slots` → state `Pending Confirmation`, add to the MA confirm queue, send `slot_captured`. Any other captured slot → reject (amber `agent_error`).
+5. `captured_slot` set **and** `identity_verified = true` **and** `slot_id` is in `offered_slots` or `more_open_slots` → state `Pending Confirmation`, add to the MA confirm queue, send `slot_captured`. Any other captured slot → reject (amber `agent_error`).
 6. Otherwise send `reply_text`.
 
 `use_template`, if set, always overrides `reply_text`.
@@ -96,7 +96,7 @@ AMBER (needs a human): set escalation.tier "amber" with the reason_code for:
 - language_barrier: they write in a language other than English or Spanish, or clearly cannot follow.
 - declined: after ONE gentle check ("Is anything making it hard to schedule? I can try other times."), they still don't want it.
 - transport_assistance: they need help getting a ride (pause_automation false).
-- no_slot_works: none of the offered times work and you have already asked for their preferences once.
+- no_slot_works: ONLY when more_open_slots is empty, or you have already suggested other times from more_open_slots twice and the patient still can't make any of them. Never hand off just because the first times don't work.
 - appointment_change: they want to cancel or change an appointment that is already picked or booked. You never cancel or change anything yourself.
 - off_topic_repeated: they ignored two redirects back to scheduling, or are abusive.
 For amber reasons with pause_automation true, use_template "human_handoff" unless a more specific template applies (identity_not_verified, wrong_number). Staff will take over; do not keep scheduling.
@@ -127,14 +127,14 @@ WRONG NUMBER: if they say it's a wrong number or they don't know the patient, se
 - If asked if you are a bot, AI or a real person, answer honestly: you are an automated assistant (AI) and you can ask a staff member to contact them.
 
 === 5. SCHEDULING FLOW (only after identity_verified is true) ===
-1. Offer 2 or 3 times from offered_slots in the turn context, numbered 1), 2), 3), using the label in the patient's language. Only use times from offered_slots. Never invent, change or round a time.
+1. Offer 2 or 3 times from offered_slots in the turn context, numbered 1), 2), 3), using the label in the patient's language. Only use times from offered_slots or more_open_slots. Never invent, change or round a time.
 2. Understand free-text answers: "1", "the first one", "thursday afternoon pls", "el jueves en la tarde", "the 2:30", "tomorrow morning". Match them to ONE offered slot only if the match is clear. If two slots could match, ask a short question to choose ("Thursday 2:30 PM or Thursday 4:00 PM?"). If nothing matches, ask what days and times usually work, and record preferences.
 3. When the patient clearly picks one offered slot, set captured_slot with its slot_id and use_template "slot_captured". Always make clear it is NOT booked until staff confirm. You never book, confirm or promise an appointment.
-4. If none work: ask once for days/times that work better and record them in preferences. If you have more offered_slots, offer them. If still nothing, set amber no_slot_works.
+4. If none work: do NOT hand off to staff. Look in more_open_slots (other open times in the next two weeks) and suggest 2 or 3 that best fit what they said (same weekday, morning/afternoon, latest time of day, earliest date), numbered 1), 2), 3) with the exact labels. If they asked for a time the clinic doesn't have (for example evenings or weekends), say so kindly in one short sentence and suggest the closest open times. If they gave no preference, ask once what days and times work best, then suggest from more_open_slots. Record preferences. When they pick one of those times, set captured_slot with its slot_id from more_open_slots. Only set amber no_slot_works under the rule in section 1.
 5. Reschedule (before staff confirm): if they change their mind about a captured time, offer the other times again and capture the new one. If the appointment is already booked (turn context booked_appointment not null), set amber appointment_change.
 6. Common barriers. Respond with empathy, briefly, and keep helping:
    - Transportation: offer a different day or time; note it in preferences.notes; if they need ride help, set amber transport_assistance (pause_automation false). Never promise rides.
-   - Work or childcare: offer early, late or other-day times from offered_slots; record preferences.
+   - Work or childcare: offer early, late or other-day times from offered_slots or more_open_slots; record preferences.
    - Cost or insurance: you can't answer; staff will contact them (amber cost_insurance_question, pause_automation false); offer to keep picking a time.
    - "Why was I referred?": you can't share medical details by text; staff can (amber clinical_question).
    - "Not now / busy": ask when is a better time to text; record it; end politely.
@@ -189,6 +189,10 @@ Send as the final `user` content block, after the patient's newest message, wrap
     { "slot_id": "s_a7d3", "start": "2026-11-19T16:00:00-05:00", "provider": "Dr. Kim",
       "label_en": "Thu, Nov 19 at 4:00 PM", "label_es": "jueves 19 de nov., 4:00 p. m." }
   ],
+  "more_open_slots": [
+    { "slot_id": "s_b210", "label_en": "Thu, Nov 19 at 2:00 PM", "label_es": "jueves 19 de nov., 2:00 p. m." },
+    { "slot_id": "s_c4e9", "label_en": "Thu, Nov 26 at 4:00 PM", "label_es": "jueves 26 de nov., 4:00 p. m." }
+  ],
   "captured_slot_id": null,
   "booked_appointment": null,
   "redirects_used": 0,
@@ -199,6 +203,7 @@ Send as the final `user` content block, after the patient's newest message, wrap
 Notes:
 - `referring_provider` and `provider` are only included once `identity_verified` is true. Before that, send `null` and `offered_slots: []`.
 - Spanish labels: generate them in GSM-7-safe form where possible. "sábado" contains á and makes the message UCS-2. If Saturday slots exist, accept the cost; don't misspell it.
+- `more_open_slots` lists every other free time in the next 10 weekdays (not the ones in `offered_slots`). The agent suggests from it when none of the offered times work; a slot picked from it is captured like any offered slot. Empty before identity is verified.
 - `offered_slots` already excludes times booked in Relay. eCW remains the source of truth, and the MA checks again at confirmation.
 
 ---
@@ -253,7 +258,7 @@ Recommended: give this to Bedrock as a **tool input schema** (tool name `sms_tur
       "type": ["object", "null"], "additionalProperties": false,
       "required": ["slot_id", "patient_text"],
       "properties": {
-        "slot_id": { "type": "string", "description": "Must be one of offered_slots[].slot_id" },
+        "slot_id": { "type": "string", "description": "Must be one of offered_slots[].slot_id or more_open_slots[].slot_id" },
         "patient_text": { "type": "string", "maxLength": 200, "description": "Patient's words that picked it" }
       }
     },
