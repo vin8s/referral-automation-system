@@ -25,7 +25,13 @@ async function ctx(): Promise<svc.ImportCtx> {
  */
 async function runFollowUps(list: svc.FollowUp[]): Promise<void> {
   if (!list.length) return;
-  const d = await smsDeps();
+  let d: Awaited<ReturnType<typeof smsDeps>>;
+  try {
+    d = await smsDeps(); // throws if SMS is misconfigured (e.g. mock in production)
+  } catch (err) {
+    logError('ecw import sms follow-up (setup)', err);
+    return;
+  }
   for (const f of list) {
     try {
       if (f.kind === 'cancelled') await afterAppointmentCancelled(d, f.referralId);
