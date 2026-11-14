@@ -338,7 +338,7 @@ export class RelayStack extends Stack {
       retentionPeriod: Duration.days(14),
     });
     const inboundTopic = new sns.Topic(this, 'InboundSmsTopic', {
-      topicName: 'relay-inbound-sms',
+      topicName: 'relay-inbound-sms', // also hard-coded in the key policy statement below
       displayName: 'Relay inbound SMS',
       masterKey: dataKey,
       enforceSSL: true,
@@ -357,6 +357,19 @@ export class RelayStack extends Stack {
       actions: ['kms:GenerateDataKey*', 'kms:Decrypt'],
       resources: ['*'],
       conditions: { StringEquals: { 'aws:SourceAccount': Aws.ACCOUNT_ID } },
+    }));
+    // SNS must also use the key to write undeliverable texts into the KMS-encrypted
+    // dead-letter queue; without this the redrive silently fails and the
+    // "inbound-sms-undelivered" alarm never fires. The topic ARN is built from its
+    // fixed name (a token reference would make a Key ↔ Topic dependency cycle).
+    dataKey.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowSnsToUseKeyForInboundDeadLetters',
+      principals: [new iam.ServicePrincipal('sns.amazonaws.com')],
+      actions: ['kms:GenerateDataKey*', 'kms:Decrypt'],
+      resources: ['*'],
+      conditions: {
+        ArnEquals: { 'aws:SourceArn': `arn:${Aws.PARTITION}:sns:${Aws.REGION}:${Aws.ACCOUNT_ID}:relay-inbound-sms` },
+      },
     }));
     const smsConfigSet = new smsvoice.CfnConfigurationSet(this, 'SmsConfigurationSet', {
       configurationSetName: 'relay-sms',
