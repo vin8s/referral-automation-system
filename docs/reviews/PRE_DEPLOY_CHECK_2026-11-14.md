@@ -37,7 +37,7 @@ sandbox. That doesn't block the deploy. You can deploy now and test with your ow
 | Commit | What |
 |---|---|
 | `517a77f` (earlier run, **kept**) | KMS key policy lets SNS write into the encrypted inbound-SMS dead-letter queue. Without it, undelivered patient replies would be lost silently and the `relay-inbound-sms-undelivered` alarm could never fire. Also adds offline infra tests (`cd infra && npm test`). Checked: the statement is scoped to the `relay-inbound-sms` topic ARN and matches the AWS-documented pattern. |
-| `7779762` (earlier run, **kept**) | Commits `infra/cdk.context.json` (us-east-2 Availability Zones for account 000755994402) so synth is the same everywhere and needs no AWS lookup. Contains no secrets. |
+| `7779762` (earlier run, **kept**) | Commits `infra/cdk.context.json` (us-east-2 Availability Zones for the Relay account) so synth is the same everywhere and needs no AWS lookup. Contains no secrets. **Update 2026-11-14:** now git-ignored and kept only locally, because it contains the AWS account ID; `cdk synth` without `--no-lookups` recreates it. |
 | `67dc854` (earlier run, **kept**) | Built-in defaults are now Eastern time and Rhode Island Free Clinic (only used if a `cdk.json` value is missing). No template change. |
 | `e10b34f` (earlier run, **kept**) | Docs: the emergency "pause texting" policy now also blocks RCS (matches the CDK). Also fixes the `clinicPhoneNumber` meaning and marks the AWS BAA as Active. |
 | `02fbcc3` | **App:** with `NODE_ENV=production`, the mock SMS provider, the mock AI and the patient simulator are now **refused**. Before this, a production container missing `SMS_PROVIDER` would mark texts "delivered" without sending anything. CDK already sets `aws`/`bedrock`, so this is a safety net. New test file: `relay-app/test/production-guards.test.ts`. |
@@ -124,7 +124,7 @@ sandbox. That doesn't block the deploy. You can deploy now and test with your ow
 | 9–10 | `relay:hostedZoneId` / `relay:hostedZoneName` | `""` | Only if the domain is in Route 53; otherwise leave blank and add the DNS records by hand (guide Part 6) |
 | 11 | `relay:cognitoDomainPrefix` | `relay-clinic-change-me` | **Required.** Unique, lowercase |
 | 13 | `relay:alertEmail` | `owner@example.org` | **Required.** Your email |
-| 17 | `relay:smsOriginationIdentity` | `""` | `phone-7adfd924a2f448c0b0833047279900b8` (your toll-free number ID) once it's registered, then deploy again |
+| 17 | `relay:smsOriginationIdentity` | `""` | `phone-…`, full ID in `docs/private/AWS_PRIVATE_IDS.md` (your toll-free number ID) once it's registered, then deploy again |
 
 Already correct: Region `us-east-2`, `America/New_York`, clinic names, clinic phone `(401) 274-6347`,
 Bedrock model, cron, budget 50/100.
@@ -162,7 +162,7 @@ Bedrock model, cron, budget 50/100.
 |---|---|
 | `git checkout -b review/pre-deploy-check origin/review/pre-deploy-check` | Pass |
 | `cd infra && npm ci` | Pass (npm warned that install scripts for `esbuild`/`fsevents` weren't approved; this had no effect) |
-| `npx cdk synth --no-lookups --quiet` (AWS config/credentials pointed at `/dev/null`, `CDK_DEFAULT_ACCOUNT=000755994402`, `CDK_DEFAULT_REGION=us-east-2`, so the committed `cdk.context.json` was used and no AWS call was possible) | Pass. Warnings for the 3 placeholders + blank `smsOriginationIdentity`, and "72 feature flags are not configured" (informational) |
+| `npx cdk synth --no-lookups --quiet` (AWS config/credentials pointed at `/dev/null`, `CDK_DEFAULT_ACCOUNT=<relay-account-id>`, `CDK_DEFAULT_REGION=us-east-2`, so the committed `cdk.context.json` was used and no AWS call was possible) | Pass. Warnings for the 3 placeholders + blank `smsOriginationIdentity`, and "72 feature flags are not configured" (informational) |
 | `cd infra && npm test` (7 CDK assertion tests) | Pass 7/7 |
 | `cd infra && npm run build` (tsc) | Pass |
 | `cfn-lint 1.46.0 --regions us-east-2` (throwaway venv, Python 3.9) | 0 real errors. 2× `E3002 Additional properties are not allowed ('Tags' was unexpected)` on the 2 ALB listeners, and `W3037 'sendrcsmessage' is not one of [...]`. Both are false positives from this older cfn-lint's out-of-date AWS schemas: 1.46.0 is the newest version that runs on Python 3.9, and CDK 2.277 only tags resources whose schema allows it. Also `W3691 Engine version '17' for engine 'postgres' is deprecated…` (see recommendation 5) and 4× W3005 (CDK's redundant DependsOn, harmless). **Re-run with a current cfn-lint on Python ≥ 3.10.** |

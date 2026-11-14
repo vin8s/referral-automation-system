@@ -93,7 +93,7 @@ Use an email address the **owner** controls long-term (e.g. `aws-admin@clinic.or
    happened for the Relay pilot account):
    - AWS creates an **organization** with a separate **management account** (used for billing, the BAA and
      organization-wide policies) and turns your project into a **member account** — Relay runs in the member
-     account (for the pilot: `Relay-Clinic-Test`, account `000755994402`).
+     account (for the pilot: `Relay-Clinic-Test`, account ID in `docs/private/AWS_PRIVATE_IDS.md`).
    - The project's **home Region is fixed** (for the pilot: **us-east-2, Ohio**) and a Region-restriction policy
      denies regional services (End User Messaging, RDS, ECS…) anywhere else. Bedrock AI calls work from any Region.
    - The BAA is then accepted as the **AWS Organizations BAA** from the management account (Step 4).
@@ -183,8 +183,8 @@ Region: change `relay:region` in `infra/cdk.json` and use it everywhere below.)
 
 ## Part 3 — Get a texting number (start early: days to weeks)
 
-> **Pilot status (2026-11-14):** toll-free number **+1 855-599-7452** is already purchased in us-east-2
-> (`phone-7adfd924a2f448c0b0833047279900b8`) and its toll-free registration exists as a **draft** filled with
+> **Pilot status (2026-11-14):** toll-free number (number in `docs/private/AWS_PRIVATE_IDS.md`) is already purchased in us-east-2
+> (`phone-…`, full ID in `docs/private/AWS_PRIVATE_IDS.md`) and its toll-free registration exists as a **draft** filled with
 > Rhode Island Free Clinic's public details. Still needed before submitting: the clinic's legal name as registered,
 > EIN, a contact person's name, and a photo/scan of the intake form showing the SMS consent checkbox.
 

@@ -12,7 +12,7 @@ Infrastructure definition: `infra/lib/relay-stack.ts`. Deployment steps: `docs/A
 
 | Item | Status | Notes |
 |---|---|---|
-| AWS Business Associate Addendum accepted in **AWS Artifact** | ✅ Active (2026-11-13) | **AWS Organizations BAA**, accepted in the management account and verified Active from the Relay account 000755994402 (see `docs/clinic/VENDOR_BAA_TRACKER.md`). Guide Part 1, step 4. Covers only HIPAA-eligible services. |
+| AWS Business Associate Addendum accepted in **AWS Artifact** | ✅ Active (2026-11-13) | **AWS Organizations BAA**, accepted in the management account and verified Active from the Relay account (see `docs/private/AWS_PRIVATE_IDS.md`) (see `docs/clinic/VENDOR_BAA_TRACKER.md`). Guide Part 1, step 4. Covers only HIPAA-eligible services. |
 | Clinic ↔ owner agreement (BAA or volunteer confidentiality) | ⬜ | See `VENDOR_BAA_TRACKER.md`. |
 | Account owned by the clinic (Route A) or owner's LLC (Route B) | ⬜ | `CLINIC_LAUNCH_PLAN.md` Phase 1. |
 
