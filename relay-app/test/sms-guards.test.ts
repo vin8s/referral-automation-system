@@ -92,7 +92,9 @@ describe('model output validation (SMS_AGENT_PROMPT §4)', () => {
   it('rejects junk and missing fields', () => {
     expect(validateModelOutput(null).ok).toBe(false);
     expect(validateModelOutput({ reply_text: 'x' }).ok).toBe(false);
-    expect(validateModelOutput(out({ reply_text: 'x'.repeat(301) })).ok).toBe(false);
+    expect(validateModelOutput(out({ reply_text: 'x'.repeat(460) })).ok).toBe(false);
+    // A little over the 300-character target is fine (up to 3 segments / 459 characters).
+    expect(validateModelOutput(out({ reply_text: 'x'.repeat(400) })).ok).toBe(true);
   });
   it('rejects tier/reason mismatches', () => {
     expect(validateModelOutput(out({ escalation: { tier: 'red', reason_code: 'complaint', pause_automation: true, staff_summary: null } })).ok).toBe(false);
@@ -163,7 +165,7 @@ describe('outbound guard', () => {
     ['Your cardiology visit', 'referral detail'],
     ['How about 11:00 AM?', 'time not in offered slots'],
     ['Great 🙂', 'emoji'],
-    ['x'.repeat(400), 'too long (3 segments)'],
+    ['x'.repeat(500), 'too long (4 segments)'],
   ])('rejects: %s', (text, problem) => {
     expect(validateOutgoing(text, ctx)).toContain(problem);
   });

@@ -199,7 +199,7 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
     if (input.correction) {
       // Written by code, never by the patient: what was wrong with the previous attempt.
       messages[messages.length - 1].content.push({
-        text: `Your previous sms_turn output was rejected: ${input.correction}. Call sms_turn again with a corrected output. reply_text must be 300 characters or less.`,
+        text: `Your previous sms_turn output was rejected: ${input.correction}. Call sms_turn again with a corrected output. Aim for 300 characters; reply_text must never exceed 459 characters.`,
       });
     }
 

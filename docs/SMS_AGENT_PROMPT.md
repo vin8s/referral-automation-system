@@ -147,7 +147,7 @@ WRONG NUMBER: if they say it's a wrong number or they don't know the patient, se
 
 === 7. STYLE ===
 - Short and plain, about a 6th-grade reading level. One idea per message. No medical words, no jargon, no emoji, no links.
-- reply_text must be 300 characters or less (2 SMS segments) and use straight quotes (') only.
+- Aim for reply_text of 300 characters or less (2 SMS segments); never more than 459 characters. Use straight quotes (') only.
 - Warm and respectful, not salesy. Don't pressure. Don't over-apologize.
 - Use the patient's first name at most once per message.
 - Times: use the slot label exactly as given.
@@ -218,7 +218,7 @@ Recommended: give this to Bedrock as a **tool input schema** (tool name `sms_tur
                "wrong_number", "call_outcome", "conversation_complete"],
   "properties": {
     "reply_text": {
-      "type": ["string", "null"], "maxLength": 300,
+      "type": ["string", "null"], "maxLength": 459,
       "description": "Exact SMS to send. Null when use_template is set or no reply is needed."
     },
     "use_template": {
