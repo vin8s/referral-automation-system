@@ -16,6 +16,7 @@
 //
 // See docs/AWS_DEPLOYMENT_GUIDE.md (how) and docs/AWS_HIPAA_CHECKLIST.md (why).
 
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   Annotations, Aws, CfnOutput, Duration, RemovalPolicy, Stack, TimeZone, type StackProps,
@@ -60,6 +61,8 @@ export interface RelayConfig {
   hostedZoneName: string;
   /** Globally unique prefix for the Cognito sign-in page: <prefix>.auth.<region>.amazoncognito.com */
   cognitoDomainPrefix: string;
+  /** Clinic name shown on Relay's sign-in screen and in the staff invitation email. */
+  clinicLoginName: string;
   /** Receives budget and alarm emails. */
   alertEmail: string;
   clinicTimeZone: string;
@@ -100,6 +103,7 @@ export function readConfig(scope: IConstruct): RelayConfig {
     hostedZoneId: str('hostedZoneId'),
     hostedZoneName: str('hostedZoneName'),
     cognitoDomainPrefix: str('cognitoDomainPrefix', 'relay-clinic-change-me').toLowerCase(),
+    clinicLoginName: str('clinicLoginName', 'Clinica Esperanza / Hope Clinic'),
     alertEmail: str('alertEmail', 'owner@example.org'),
     clinicTimeZone: str('clinicTimeZone', 'America/Los_Angeles'),
     clinicDisplayName: str('clinicDisplayName', 'Example Free Clinic'),
@@ -209,29 +213,47 @@ export class RelayStack extends Stack {
     });
     const dbSecret = db.secret!;
 
-    // ── Staff login: Cognito ──
+    // ── Staff login: Cognito (managed login) ──
+    // Decisions (see docs/STAFF_LOGINS.md and docs/AWS_HIPAA_CHECKLIST.md):
+    //   • Only the owner creates accounts (no self sign-up). Cognito emails a temporary
+    //     password; the first sign-in forces a new password, then authenticator-app (TOTP)
+    //     enrollment. MFA is REQUIRED for everyone; SMS MFA is off (no SNS, no SIM-swap risk).
+    //   • "Forgot password" works by a code emailed to the person's verified address.
+    //   • Email is sent by Cognito's built-in sender (no SES setup). Limit: 50 emails/day
+    //     per AWS account — plenty for ~5 staff. Switch to SES if that ever bites.
+    //   • Relay keeps no Cognito tokens: it reads the ID token once at sign-in and issues its
+    //     own cookie (30 min idle / 8 h absolute). So Cognito token lifetimes are short.
     const userPool = new cognito.UserPool(this, 'StaffUserPool', {
       userPoolName: 'relay-staff',
-      featurePlan: cognito.FeaturePlan.ESSENTIALS,
-      selfSignUpEnabled: false, // only an admin can create staff accounts
+      featurePlan: cognito.FeaturePlan.ESSENTIALS, // needed for managed login + branding + Spanish pages
+      selfSignUpEnabled: false, // AllowAdminCreateUserOnly: only an admin can create staff accounts
       signInAliases: { email: true },
       signInCaseSensitive: false,
       autoVerify: { email: true },
+      // (given_name / family_name / name are standard attributes and always available.)
       standardAttributes: { email: { required: true, mutable: true } },
       mfa: cognito.Mfa.REQUIRED,
-      mfaSecondFactor: { otp: true, sms: false }, // authenticator app; no SMS costs
+      mfaSecondFactor: { otp: true, sms: false }, // authenticator app only
       passwordPolicy: {
         minLength: 12,
         requireLowercase: true,
         requireUppercase: true,
         requireDigits: true,
-        requireSymbols: false,
-        tempPasswordValidity: Duration.days(3),
+        requireSymbols: true,
+        tempPasswordValidity: Duration.days(3), // invitation must be used within 3 days
+        passwordHistorySize: 5, // can't reuse the last 5 passwords (Essentials)
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+      email: cognito.UserPoolEmail.withCognito(), // COGNITO_DEFAULT: no-reply@verificationemail.com, 50/day
       userInvitation: {
-        emailSubject: 'Your Relay staff account',
-        emailBody: `You have been invited to Relay (${cfg.clinicDisplayName}). Sign in at ${appUrl} with username {username} and temporary password {####}. You will be asked to choose a new password and set up an authenticator app.`,
+        emailSubject: `Your Relay account for ${cfg.clinicLoginName}`,
+        emailBody: invitationEmail(appUrl, cfg.clinicLoginName),
+      },
+      userVerification: {
+        // Used for "Forgot password" codes (and email verification).
+        emailSubject: 'Your Relay verification code',
+        emailBody: verificationEmail(cfg.clinicLoginName),
+        emailStyle: cognito.VerificationEmailStyle.CODE,
       },
       deletionProtection: true,
       removalPolicy: RemovalPolicy.RETAIN,
@@ -250,25 +272,42 @@ export class RelayStack extends Stack {
     });
     const userPoolDomain = userPool.addDomain('HostedDomain', {
       cognitoDomain: { domainPrefix: cfg.cognitoDomainPrefix },
-      managedLoginVersion: cognito.ManagedLoginVersion.CLASSIC_HOSTED_UI,
+      managedLoginVersion: cognito.ManagedLoginVersion.NEWER_MANAGED_LOGIN, // branded pages, prompt=login, lang=es
     });
     const appClient = userPool.addClient('RelayWebClient', {
       userPoolClientName: 'relay-web',
-      generateSecret: true, // confidential client (the Next.js server holds the secret)
-      authFlows: {}, // only the hosted sign-in page; no direct password APIs
+      generateSecret: true, // confidential client (the Next.js server holds the secret); PKCE on top
+      authFlows: {}, // only the managed sign-in pages; no direct password APIs
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
         callbackUrls: [`${appUrl}/api/auth/callback`],
-        logoutUrls: [`${appUrl}/login`],
+        // Must match relay-app/src/server/auth/cognito.ts LOGOUT_RETURN_PATHS exactly.
+        logoutUrls: [`${appUrl}/login?signed_out=1`, `${appUrl}/login?error=no_role`],
       },
       supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
       preventUserExistenceErrors: true,
-      idTokenValidity: Duration.hours(1),
-      accessTokenValidity: Duration.hours(1),
-      refreshTokenValidity: Duration.hours(8),
+      // Relay reads the ID token once at sign-in and never stores Cognito tokens.
+      idTokenValidity: Duration.minutes(15),
+      accessTokenValidity: Duration.minutes(15),
+      refreshTokenValidity: Duration.minutes(60), // minimum allowed; unused by Relay
+      // Time allowed between sign-in steps (password → new password → authenticator setup).
+      authSessionValidity: Duration.minutes(15), // maximum; first sign-in includes installing an app
       enableTokenRevocation: true,
     });
+    // Managed login needs a branding style per app client (CloudFormation/CDK don't add one).
+    const branding = new cognito.CfnManagedLoginBranding(this, 'ManagedLoginBranding', {
+      userPoolId: userPool.userPoolId,
+      clientId: appClient.userPoolClientId,
+      settings: managedLoginSettings(),
+      assets: [{
+        category: 'FORM_LOGO',
+        colorMode: 'LIGHT',
+        extension: 'PNG',
+        bytes: fs.readFileSync(path.join(__dirname, '..', 'assets', 'cognito-form-logo.png')).toString('base64'),
+      }],
+    });
+    branding.node.addDependency(userPoolDomain);
 
     // ── App secrets ──
     const authSecret = new secretsmanager.Secret(this, 'AuthSecret', {
@@ -395,6 +434,9 @@ export class RelayStack extends Stack {
           COGNITO_ADMIN_GROUP: 'admin',
           COGNITO_MA_GROUP: 'ma',
           COGNITO_SCOPES: 'openid email profile',
+          CLINIC_LOGIN_NAME: cfg.clinicLoginName,
+          SESSION_IDLE_MINUTES: '30',
+          SESSION_HOURS: '8',
           VOICE_ENABLED: 'false',
           AWS_REGION: Aws.REGION,
           SMS_PROVIDER: 'aws',
@@ -573,7 +615,8 @@ export class RelayStack extends Stack {
     out('LoadBalancerDns', service.loadBalancer.loadBalancerDnsName,
       zone ? 'Load balancer (Route 53 alias created automatically)' : `Create a CNAME record ${cfg.domainName} → this value at your DNS provider`);
     out('UserPoolId', userPool.userPoolId, 'Cognito user pool: create staff users here');
-    out('CognitoSignInDomain', userPoolDomain.baseUrl(), 'Hosted sign-in page domain');
+    out('CognitoSignInDomain', userPoolDomain.baseUrl(), 'Cognito managed login (sign-in page) domain');
+    out('CognitoAppClientId', appClient.userPoolClientId, 'Cognito app client used by Relay (relay-web)');
     out('InboundSmsTopicArn', inboundTopic.topicArn, 'Set as the two-way SMS destination on your End User Messaging phone number');
     out('SmsConfigurationSetName', 'relay-sms', 'End User Messaging configuration set');
     out('DatabaseEndpoint', db.dbInstanceEndpointAddress, 'Private: reachable only from inside the VPC');
@@ -595,5 +638,109 @@ function budgetAlert(email: string, type: 'ACTUAL' | 'FORECASTED', percent: numb
       thresholdType: 'PERCENTAGE',
     },
     subscribers: [{ subscriptionType: 'EMAIL', address: email }],
+  };
+}
+
+// ── Staff login emails (Cognito) ──
+// Cognito sends these as HTML. Required placeholders: {username} and {####}
+// (the temporary password / code). Keep under 20,000 characters; subject under 140.
+
+function invitationEmail(appUrl: string, clinic: string): string {
+  return [
+    `<p>Hello,</p>`,
+    `<p>You now have a staff account for <b>Relay</b>, ${clinic}'s referral scheduling console.</p>`,
+    `<p><b>Sign in at:</b> <a href="${appUrl}">${appUrl}</a><br>`,
+    `<b>Email (username):</b> {username}<br>`,
+    `<b>Temporary password:</b> {####}</p>`,
+    `<p>The temporary password works for 3 days. When you first sign in you will:</p>`,
+    `<ol><li>enter the temporary password,</li><li>choose your own new password, and</li>`,
+    `<li>set up an <b>authenticator app</b> on your phone (Google Authenticator, Microsoft Authenticator or similar): scan the QR code and type the 6-digit code.</li></ol>`,
+    `<p>After that, each sign-in asks for your password and a code from the app. If the temporary password has expired or you get stuck, ask the clinic administrator.</p>`,
+    `<hr><p>Ya tiene una cuenta de personal en <b>Relay</b>. Inicie sesión en <a href="${appUrl}">${appUrl}</a> con su correo ({username}) y la contraseña temporal de arriba (válida por 3 días). Elegirá una contraseña nueva y configurará una aplicación autenticadora en su teléfono.</p>`,
+    `<p style="color:#64748b;font-size:12px">This email was sent because the clinic administrator created your account. Do not forward it.</p>`,
+  ].join('\n');
+}
+
+function verificationEmail(clinic: string): string {
+  return [
+    `<p>Your Relay verification code is <b>{####}</b></p>`,
+    `<p>Enter it on the Relay sign-in page to reset your password. If you didn't ask for this, ignore this email and tell the ${clinic} administrator.</p>`,
+    `<p>Su código de verificación de Relay es <b>{####}</b>. Ingréselo en la página de inicio de sesión para restablecer su contraseña.</p>`,
+  ].join('\n');
+}
+
+/**
+ * Managed-login branding (AWS::Cognito::ManagedLoginBranding Settings). Partial on
+ * purpose: Cognito uses its defaults for anything not listed. Colors are RRGGBBAA,
+ * taken from relay-app/src/app/globals.css (--relay-accent #0d9488, --relay-accent-700
+ * #0f766e, --relay-bg #f4f7f8, --relay-ink #0f172a). Text on these pages can't be
+ * customized (only localized), so the clinic name lives in the logo image.
+ */
+function managedLoginSettings(): Record<string, unknown> {
+  const accent = '0d9488ff';
+  const accentDark = '0f766eff';
+  const accentDeep = '115e59ff';
+  const ink = '0f172aff';
+  const ink2 = '334155ff';
+  const ink3 = '64748bff';
+  const hairline = 'd2d9ddff';
+  return {
+    categories: {
+      global: {
+        colorSchemeMode: 'LIGHT',
+        pageHeader: { enabled: false },
+        pageFooter: { enabled: false },
+        spacingDensity: 'REGULAR',
+      },
+      form: {
+        displayGraphics: true,
+        instructions: { enabled: false },
+        languageSelector: { enabled: false },
+        location: { horizontal: 'CENTER', vertical: 'CENTER' },
+        sessionTimerDisplay: 'NONE',
+      },
+    },
+    componentClasses: {
+      buttons: { borderRadius: 8.0 },
+      input: {
+        borderRadius: 8.0,
+        lightMode: { defaults: { backgroundColor: 'ffffffff', borderColor: hairline }, placeholderColor: '94a3b8ff' },
+      },
+      inputLabel: { lightMode: { textColor: ink2 } },
+      inputDescription: { lightMode: { textColor: ink3 } },
+      focusState: { lightMode: { borderColor: accent } },
+      link: { lightMode: { defaults: { textColor: accentDark }, hover: { textColor: accentDeep } } },
+      optionControls: {
+        lightMode: {
+          defaults: { backgroundColor: 'ffffffff', borderColor: hairline },
+          selected: { backgroundColor: accent, foregroundColor: 'ffffffff' },
+        },
+      },
+    },
+    components: {
+      pageBackground: { image: { enabled: false }, lightMode: { color: 'f4f7f8ff' } },
+      form: {
+        backgroundImage: { enabled: false },
+        borderRadius: 10.0,
+        lightMode: { backgroundColor: 'ffffffff', borderColor: 'e4e9ecff' },
+        logo: { enabled: true, formInclusion: 'IN', location: 'CENTER', position: 'TOP' },
+      },
+      pageText: { lightMode: { headingColor: ink, bodyColor: ink2, descriptionColor: ink3 } },
+      primaryButton: {
+        lightMode: {
+          defaults: { backgroundColor: accent, textColor: 'ffffffff' },
+          hover: { backgroundColor: accentDark, textColor: 'ffffffff' },
+          active: { backgroundColor: accentDeep, textColor: 'ffffffff' },
+          disabled: { backgroundColor: 'cbd5e1ff', borderColor: 'cbd5e1ff' },
+        },
+      },
+      secondaryButton: {
+        lightMode: {
+          defaults: { backgroundColor: 'ffffffff', borderColor: accent, textColor: accentDark },
+          hover: { backgroundColor: 'f0fdfaff', borderColor: accentDark, textColor: accentDeep },
+          active: { backgroundColor: 'ccfbf1ff', borderColor: accentDeep, textColor: accentDeep },
+        },
+      },
+    },
   };
 }

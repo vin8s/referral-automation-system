@@ -9,6 +9,7 @@
     "relay:hostedZoneId": "",
     "relay:hostedZoneName": "",
     "relay:cognitoDomainPrefix": "relay-clinic-change-me",
+    "relay:clinicLoginName": "Clinica Esperanza / Hope Clinic",
     "relay:alertEmail": "owner@example.org",
     "relay:clinicTimeZone": "America/Los_Angeles",
     "relay:clinicDisplayName": "Example Free Clinic",
