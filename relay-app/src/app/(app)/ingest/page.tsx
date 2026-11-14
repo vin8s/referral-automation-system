@@ -154,7 +154,7 @@ function downloadTemplate() {
   ];
   const example = [
     'Jane Smith', '03/15/1962', '(415) 555-0101', 'F', 'English',
-    'Aetna', 'AFib follow-up', 'Dr. Chen', 'normal', 'Mission Bay',
+    'Aetna', 'AFib follow-up', 'Dr. Chen', 'normal', 'Providence',
     'yes', 'intake form',
   ];
   const ws = xlsxUtils.aoa_to_sheet([headers, example]);

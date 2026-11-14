@@ -2,10 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import {
-  getConfirmQueue, getPipeline, getReferrals,
-  getOutreachLog, getCalendarEvents,
-} from '@/lib/data';
+import { getConfirmQueue, getReferrals } from '@/lib/data';
 import { outcomeLabel } from '@/lib/format';
 import { PageHead } from '@/components/layout/PageHead';
 import { StatePill } from '@/components/shared/StatePill';
@@ -13,10 +10,8 @@ import { Icon } from '@/components/shared/Icon';
 import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList';
 import { useSession } from '@/contexts/SessionContext';
 import { ScheduleFreshnessBanner } from '@/components/shared/ScheduleFreshnessBanner';
-import type {
-  ConfirmQueue, PipelineCount, Referral,
-  OutreachLogEntry, CalendarEvent,
-} from '@/lib/types';
+import { RunOutreachButton } from '@/components/shared/RunOutreachButton';
+import type { ConfirmQueue, Referral } from '@/lib/types';
 
 // ── Referral quick-view modal ─────────────────────────────────────────────────
 function ReferralQuickViewModal({ referral, onClose }: { referral: Referral; onClose: () => void }) {
@@ -98,207 +93,6 @@ function ReferralQuickViewModal({ referral, onClose }: { referral: Referral; onC
   );
 }
 
-// ── Work-list strips: red escalations and amber needs-a-human, never merged ──
-
-function WorkListStrips({ escalations, needsHuman }: { escalations: number; needsHuman: number }) {
-  if (escalations === 0 && needsHuman === 0) return null;
-  return (
-    <div className="stack" style={{ gap: 10, marginBottom: 16 }}>
-      {escalations > 0 && (
-        <div className="alerts-strip escalated" role="alert">
-          <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--st-escalated-bg)', color: 'var(--st-escalated-fg)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-            <Icon name="alert" size={15} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--st-escalated-fg)' }}>
-              {escalations} escalated referral{escalations !== 1 ? 's' : ''} — act now
-            </div>
-            <div style={{ fontSize: 12.5, color: 'var(--relay-ink-3)', marginTop: 2 }}>Possible emergency or crisis reported by text. Texting is paused.</div>
-          </div>
-          <Link href="/action#escalated"><button className="btn btn-sm">Open <Icon name="arrow" size={11} /></button></Link>
-        </div>
-      )}
-      {needsHuman > 0 && (
-        <div className="alerts-strip">
-          <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--relay-urgent-100)', color: 'var(--relay-urgent-700)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-            <Icon name="user" size={14} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 13.5 }}>{needsHuman} item{needsHuman !== 1 ? 's' : ''} need{needsHuman === 1 ? 's' : ''} a human</div>
-            <div style={{ fontSize: 12.5, color: 'var(--relay-ink-3)', marginTop: 2 }}>Questions, wrong numbers and eCW changes. Same business day.</div>
-          </div>
-          <Link href="/action#needs-human"><button className="btn btn-sm">Review <Icon name="arrow" size={11} /></button></Link>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Recent texting outreach card ──────────────────────────────────────────────
-
-function OutreachLogCard({ entries }: { entries: OutreachLogEntry[] }) {
-  const recent = entries.slice(0, 7);
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
-
-  return (
-    <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      <div className="card-head">
-        <div>
-          <h3>Recent texting outreach</h3>
-          <p className="card-sub">Most recent text attempts · click to expand</p>
-        </div>
-        <Link href="/messages">
-          <button className="btn btn-sm btn-ghost">View all <Icon name="arrow" size={11} /></button>
-        </Link>
-      </div>
-      <div style={{ gap: 0 }}>
-        {recent.map((entry, i) => {
-          const key = `${entry.referralId}-${entry.attempt}`;
-          const isExpanded = expandedKey === key;
-          const isLast = i === recent.length - 1;
-
-          return (
-            <div key={key} style={{ borderBottom: isLast && !isExpanded ? 'none' : '1px solid var(--relay-hairline)' }}>
-              {/* Row */}
-              <div
-                onClick={() => setExpandedKey(isExpanded ? null : key)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 0', cursor: 'pointer',
-                  background: isExpanded ? 'var(--relay-tint)' : 'transparent',
-                  margin: isExpanded ? '0 -16px' : undefined,
-                  paddingLeft: isExpanded ? 16 : undefined,
-                  paddingRight: isExpanded ? 16 : undefined,
-                }}
-              >
-                <div style={{
-                  width: 28, height: 28, borderRadius: 6,
-                  background: 'var(--relay-tint)', border: '1px solid var(--relay-hairline)',
-                  display: 'grid', placeItems: 'center', flexShrink: 0, color: 'var(--relay-ink-3)',
-                }}>
-                  <Icon name="sms" size={13} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {entry.patient}
-                  </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
-                    {entry.timestamp} · {outcomeLabel(entry.outcome)}
-                  </div>
-                </div>
-                <StatePill state={entry.referralState} />
-                <span style={{
-                  color: 'var(--relay-ink-4)', display: 'inline-flex',
-                  transform: isExpanded ? 'rotate(180deg)' : 'none',
-                  transition: 'transform 150ms', flexShrink: 0,
-                }}>
-                  <Icon name="chevron" size={11} />
-                </span>
-              </div>
-
-              {/* Expanded detail */}
-              {isExpanded && (
-                <div style={{
-                  margin: '0 -16px',
-                  padding: '12px 16px 14px',
-                  background: 'var(--relay-tint)',
-                  borderTop: '1px solid var(--relay-hairline)',
-                }}>
-                  {entry.summary && (
-                    <div style={{
-                      fontSize: 12.5, color: 'var(--relay-ink-2)', lineHeight: 1.5,
-                      background: 'var(--relay-surface)', borderRadius: 6,
-                      padding: '8px 10px', marginBottom: 10,
-                      border: '1px solid var(--relay-hairline)',
-                    }}>
-                      <span style={{ fontWeight: 600, color: 'var(--relay-ink-3)', fontSize: 11 }}>AI summary · </span>
-                      {entry.summary}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--relay-ink-3)', flexWrap: 'wrap', marginBottom: 10 }}>
-                    <span>
-                      <span style={{ color: 'var(--relay-ink-4)' }}>Attempt · </span>
-                      #{entry.attempt}
-                    </span>
-                    <span>
-                      <span style={{ color: 'var(--relay-ink-4)' }}>Language · </span>
-                      {entry.language}
-                    </span>
-                    {entry.escalated && (
-                      <span style={{ color: 'var(--st-escalated-fg)', fontWeight: 500 }}>⚑ Escalation raised</span>
-                    )}
-                  </div>
-                  <Link href={`/referrals/${entry.referralId}`}>
-                    <button className="btn btn-sm btn-ghost" style={{ fontSize: 12 }}>
-                      Open referral {entry.referralId} <Icon name="arrow" size={11} />
-                    </button>
-                  </Link>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Upcoming appointments card ────────────────────────────────────────────────
-function UpcomingAppointmentsCard({ events }: { events: CalendarEvent[] }) {
-  const upcoming = events.slice(0, 5);
-  return (
-    <div className="card" style={{ flex: 1 }}>
-      <div className="card-head">
-        <div>
-          <h3>Upcoming appointments</h3>
-          <p className="card-sub">Confirmed bookings · shadow calendar</p>
-        </div>
-        <Link href="/calendar">
-          <button className="btn btn-sm btn-ghost">Calendar <Icon name="arrow" size={11} /></button>
-        </Link>
-      </div>
-      {upcoming.length === 0 ? (
-        <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--relay-ink-3)', fontSize: 13 }}>
-          No upcoming bookings yet
-        </div>
-      ) : (
-        <div className="stack-tight" style={{ gap: 0 }}>
-          {upcoming.map((ev, i) => (
-            <div
-              key={ev.referralId}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '9px 0',
-                borderBottom: i < upcoming.length - 1 ? '1px dashed var(--relay-hairline)' : 'none',
-              }}
-            >
-              <div style={{
-                width: 34, height: 34, borderRadius: 8,
-                background: 'var(--relay-accent-50)', border: '1px solid var(--relay-accent-200)',
-                display: 'grid', placeItems: 'center', flexShrink: 0,
-              }}>
-                <Icon name="cal" size={15} style={{ color: 'var(--relay-accent-700)' }} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 13 }}>{ev.patient}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>
-                  {ev.day} · {ev.time} · {ev.provider}
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-                <StatePill state={ev.state} />
-                {ev.mirrorStatus === 'mirrored' && (
-                  <span style={{ fontSize: 10.5, color: 'var(--relay-ink-4)' }}>mirrored ✓</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Recent referrals table ────────────────────────────────────────────────────
 function RecentReferralsTable({ rows, onRowClick }: { rows: Referral[]; onRowClick: (r: Referral) => void }) {
   return (
@@ -340,56 +134,17 @@ function RecentReferralsTable({ rows, onRowClick }: { rows: Referral[]; onRowCli
   );
 }
 
-// ── Quick stats card ──────────────────────────────────────────────────────────
-function QuickStatsCard({ pipeline, outreachCount }: { pipeline: PipelineCount[]; outreachCount: number }) {
-  const active = pipeline.filter(p => p.state !== 'Booked').reduce((a, b) => a + b.count, 0);
-  const pending = pipeline.find(p => p.state === 'Pending Confirmation')?.count ?? 0;
-  const confirmed = pipeline.find(p => p.state === 'Booked')?.count ?? 0;
-
-  const stats = [
-    { label: 'Referrals active', value: active },
-    { label: 'Texts sent', value: outreachCount },
-    { label: 'Slots pending', value: pending },
-    { label: 'Confirmed', value: confirmed },
-  ];
-
-  return (
-    <div className="card" style={{ flex: 'none', gap: 12 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        {stats.map(s => (
-          <div key={s.label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--relay-ink)', lineHeight: 1.1 }}>{s.value}</span>
-            <span style={{ fontSize: 11.5, color: 'var(--relay-ink-3)' }}>{s.label}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ── Dashboard page ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useSession();
   const [queue, setQueue]                   = useState<ConfirmQueue>({ escalations: [], needsHuman: [], slots: [] });
-  const [pipeline, setPipeline]             = useState<PipelineCount[]>([]);
   const [referrals, setReferrals]           = useState<Referral[]>([]);
-  const [outreachLog, setOutreachLog]       = useState<OutreachLogEntry[]>([]);
-  const [calEvents, setCalEvents]           = useState<CalendarEvent[]>([]);
   const [selectedReferral, setSelectedReferral] = useState<Referral | null>(null);
 
   const fetchAll = useCallback(() => {
-    Promise.all([
-      getConfirmQueue(),
-      getPipeline(),
-      getReferrals(),
-      getOutreachLog(),
-      getCalendarEvents(),
-    ]).then(([q, p, r, ol, ce]) => {
+    Promise.all([getConfirmQueue(), getReferrals()]).then(([q, r]) => {
       setQueue(q);
-      setPipeline(p);
       setReferrals(r);
-      setOutreachLog(ol);
-      setCalEvents(ce);
     });
   }, []);
 
@@ -407,43 +162,34 @@ export default function DashboardPage() {
         title={`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, ${user.name.split(' ')[0]}`}
         sub={`Today is ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
       >
-        <Link href="/action">
-          <button className="btn btn-sm btn-primary"><Icon name="check" size={12} /> Open confirm queue</button>
-        </Link>
+        <RunOutreachButton onDone={fetchAll} />
       </PageHead>
 
       <ScheduleFreshnessBanner />
-      <WorkListStrips escalations={queue.escalations.length} needsHuman={queue.needsHuman.length} />
 
       <div className="stack">
-        {/* Row 1 — slots to confirm + stats card + recent texting outreach */}
-        <div className="row" style={{ alignItems: 'stretch' }}>
-          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="card" style={{ flex: 'none' }}>
-              <div className="card-head">
-                <div>
-                  <h3>Slots to confirm</h3>
-                  <p className="card-sub">Times patients picked by text, awaiting confirmation in your practice system</p>
-                </div>
-                {slots.length > 0 && (
-                  <span style={{
-                    fontSize: 11.5, padding: '2px 9px', borderRadius: 99, fontWeight: 500,
-                    background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)',
-                  }}>
-                    {slots.length} pending
-                  </span>
-                )}
-              </div>
-              <div style={{ maxHeight: 208, overflowY: 'auto' }}>
-                <ActionQueueList items={slots} compact onConfirmed={handleConfirmed} />
-              </div>
+        {/* Slots to confirm */}
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h3>Slots to confirm</h3>
+              <p className="card-sub">Times patients picked by text, awaiting confirmation in your practice system</p>
             </div>
-            <QuickStatsCard pipeline={pipeline} outreachCount={outreachLog.length} />
+            {slots.length > 0 && (
+              <span style={{
+                fontSize: 11.5, padding: '2px 9px', borderRadius: 99, fontWeight: 500,
+                background: 'var(--st-accepted-bg)', color: 'var(--st-accepted-fg)',
+              }}>
+                {slots.length} pending
+              </span>
+            )}
           </div>
-          <OutreachLogCard entries={outreachLog} />
+          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+            <ActionQueueList items={slots} compact onConfirmed={handleConfirmed} />
+          </div>
         </div>
 
-        {/* Row 2 — recent referrals */}
+        {/* Recent referrals */}
         <div className="card" style={{ padding: 0 }}>
           <div className="card-head" style={{ padding: '14px 16px 12px', marginBottom: 0, borderBottom: '1px solid var(--relay-hairline)' }}>
             <div>
@@ -456,9 +202,6 @@ export default function DashboardPage() {
           </div>
           <RecentReferralsTable rows={referrals.slice(0, 8)} onRowClick={setSelectedReferral} />
         </div>
-
-        {/* Row 3 — upcoming appointments */}
-        <UpcomingAppointmentsCard events={calEvents} />
       </div>
 
       {selectedReferral && (
