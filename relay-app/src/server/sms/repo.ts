@@ -4,6 +4,7 @@
 import 'server-only';
 import type { Queryable } from '@/server/db';
 import type { SessionUser } from '@/lib/auth-types';
+import { busySlotsOnGrid } from '@/lib/slots';
 import { DEFAULT_OUTREACH_SETTINGS, type OutreachSettings } from './schedule';
 import type { Lang } from './templates';
 import type { OfferedSlot } from './types';
@@ -347,10 +348,27 @@ export async function setSmsAttemptOutcome(q: Queryable, referralId: string, out
 
 // ── Appointments (captured slots) ───────────────────────────────────────────
 
+/**
+ * Times that must not be offered: captured/confirmed slots in Relay plus busy times
+ * from the latest eCW schedule import (ecw_busy_slots, mapped onto the slot grid).
+ */
 export async function takenSlots(q: Queryable): Promise<{ day: string; time: string }[]> {
-  const { rows } = await q.query<{ day: string; time: string }>(
-    `select day, time from appointments where status in ('captured', 'confirmed') and day is not null and time is not null`);
-  return rows;
+  const [{ rows }, busy] = await Promise.all([
+    q.query<{ day: string; time: string }>(
+      `select day, time from appointments where status in ('captured', 'confirmed') and day is not null and time is not null`),
+    q.query<{ local_date: string; start_min: number; duration_min: number }>(
+      `select to_char(local_date, 'YYYY-MM-DD') as local_date, start_min, duration_min from ecw_busy_slots
+        where local_date >= current_date - 1`),
+  ]);
+  return [...rows, ...busySlotsOnGrid(busy.rows.map(b => ({ date: b.local_date, startMin: b.start_min, durationMin: b.duration_min })))];
+}
+
+/** Held (quiet-hours) texts for a referral that must no longer go out, e.g. it was booked in eCW. */
+export async function suppressHeldTexts(q: Queryable, referralId: string, why: string): Promise<number> {
+  const { rows } = await q.query(
+    `update messages set status = 'suppressed', error_code = $2, send_after = null
+      where referral_id = $1 and status = 'held' returning id`, [referralId, why]);
+  return rows.length;
 }
 
 export async function captureSlot(q: Queryable, referralId: string, slot: OfferedSlot, now: Date): Promise<void> {

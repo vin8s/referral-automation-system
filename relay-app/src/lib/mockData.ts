@@ -375,6 +375,22 @@ export const referrals: Referral[] = [
     attempts: [{ n: 1, timestamp: 'Apr 28, 9:00 AM', channel: 'voice' as const, outcome: 'Appointment Accepted' as const, duration: '2:55', disclosurePlayed: true, summary: 'Patient accepted Wed May 6 2:30pm with Dr. Park.', transcript: [] }],
     audit: [{ at: 'Apr 28, 9:03 AM', who: 'AI agent', what: 'Captured slot Wed May 6 2:30pm' }, { at: 'Apr 28, 4:00 PM', who: 'Priya Anand', what: 'Confirmed in practice system' }],
   },
+  // Same patient as REF-1051, referred a second time (two open referrals for one person:
+  // the eCW import must not guess which one an appointment belongs to).
+  {
+    id: 'REF-1093',
+    patient: { name: 'Maria Delgado', age: 58, sex: 'F', dateOfBirth: '07/22/1968', phone: '+14155550105', language: 'Spanish', insurance: 'Blue Shield PPO' },
+    reason: 'Holter monitor follow-up',
+    referringProvider: 'Dr. Chen',
+    referralSource: 'EHR feed',
+    referralTime: 'Apr 29, 9:00 AM',
+    location: 'Mission Bay',
+    priority: 'normal',
+    state: 'Queued',
+    capturedSlot: null,
+    attempts: [],
+    audit: [{ at: 'Apr 29, 9:01 AM', who: 'System', what: 'Ingested, validated, queued' }],
+  },
   // Outreach referrals (fill to keep pipeline counts realistic)
   ...(['Linda Brown','Omar Farah','Nina Petrov','Carl Jensen','Aisha Bello','Tom Whitaker','Sara Kim','Luis Mendez','Ruth Cohen','Ben Adler'] as const).map((name, i): Referral => ({
     id: `REF-10${70 + i}`,

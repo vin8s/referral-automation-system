@@ -101,7 +101,7 @@ interface ReferralRow {
   escalation_reason: string | null; escalation_severity: string | null;
   escalation_raised_at: Date | null; escalation_owner: string | null;
   p_name: string; p_dob: string | null; p_sex: string | null; p_phone: string | null;
-  p_language: string; p_insurance: string | null;
+  p_language: string; p_insurance: string | null; p_mrn: string | null;
 }
 interface AttemptRow {
   id: string; referral_id: string; attempted_at: Date; channel: string; outcome: string | null;
@@ -121,7 +121,7 @@ const REFERRAL_COLUMNS = `
   r.priority, r.state, r.escalation_reason, r.escalation_severity, r.escalation_raised_at,
   r.escalation_owner,
   p.name as p_name, to_char(p.date_of_birth, 'YYYY-MM-DD') as p_dob, p.sex as p_sex,
-  p.phone as p_phone, p.language as p_language, p.insurance as p_insurance`;
+  p.phone as p_phone, p.language as p_language, p.insurance as p_insurance, p.mrn as p_mrn`;
 
 function asTranscript(v: unknown): TranscriptTurn[] {
   if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return []; } }
@@ -193,6 +193,7 @@ async function loadReferrals(
         phone: row.p_phone ?? '',
         language: row.p_language,
         insurance: row.p_insurance ?? '',
+        ...(row.p_mrn ? { mrn: row.p_mrn } : {}),
       },
       reason: row.reason ?? '',
       referringProvider: row.referring_provider ?? '',

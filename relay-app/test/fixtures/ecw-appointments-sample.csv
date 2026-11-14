@@ -1,0 +1,22 @@
+Appointment Report - Community Health Clinic (FAKE DATA - TEST ONLY)
+Appointment Date,Start Time,Duration,Patient Name,DOB,Account No,Phone,Provider,Facility,Visit Type,Status
+11/16/2026,9:00 AM,30,"OKAFOR, JAMES",03/12/1959,201042,(415) 555-0101,"Park, Dana MD",Mission Bay,NEW SPEC,Scheduled
+11/16/2026,10:30 AM,30,"Klein, Robert",01/08/1954,,415-555-0102,"Lin, Mei MD",Mission Bay,NEW SPEC,Confirmed
+11/17/2026,2:00 PM,30,"Brown, Linda",05/14/1976,201070,415-555-0120,"Chen, Ana MD",Mission Bay,NEW SPEC,PEN
+11/17/2026,9:00 AM,30,"Bell, Mark",01/07/1968,,4155550117,"Chen, Ana MD",Mission Bay,FOLLOW UP,Scheduled
+04/17/2026,9:00 AM,30,"Tanaka, Yuki",04/15/1975,201033,415-555-0107,"Lin, Mei MD",Mission Bay,NEW SPEC,Cancelled
+04/14/2026,9:30 AM,30,"Brandt, Helena",03/15/1964,201086,415-555-0112,"Park, Dana MD",Mission Bay,NEW SPEC,N/S
+04/15/2026,10:00 AM,30,"Pham, Linh",08/20/1970,201087,415-555-0113,"Lin, Mei MD",Mission Bay,NEW SPEC,R/S
+04/15/2026,2:00 PM,30,"Patel, Aisha",06/05/1978,201088,415-555-0114,"Chen, Ana MD",Mission Bay,NEW SPEC,Checked Out
+04/18/2026,10:00 AM,30,"Reyes, Sofia",04/22/1961,201090,415-555-0116,"Lin, Mei MD",Mission Bay,NEW SPEC,Scheduled
+11/18/2026,11:00 AM,30,"Delgado, Maria",07/22/1968,201051,415-555-0105,"Park, Dana MD",Mission Bay,NEW SPEC,Scheduled
+11/18/2026,2:00 PM,30,"Walsh, Patty",05/03/1958,,415-555-0199,"Chen, Ana MD",Mission Bay,NEW SPEC,Scheduled
+11/19/2026,9:00 AM,30,"Briggs, Walter",09/03/1962,201047,415-555-0106,"Park, Dana MD",Mission Bay,NEW SPEC,Scheduled
+11/19/2026,10:30 AM,30,"Mwangi, Grace",02/28/1981,201058,415-555-0108,"Lin, Mei MD",Mission Bay,NEW SPEC,Waitlist
+11/31/2026,4:00 PM,30,"Reyes, Daniel",11/11/1966,201059,415-555-0109,"Chen, Ana MD",Mission Bay,NEW SPEC,Scheduled
+11/16/2026,8:00 AM,20,"Nguyen, Thomas",02/02/1980,300101,415-555-0150,"Ortiz, Sam NP",Mission Bay,ADULT WELL,Arrived
+11/16/2026,2:00 PM,30,"Garcia, Elena",07/09/1990,300102,415-555-0151,"Park, Dana MD",Mission Bay,FOLLOW UP,Scheduled
+11/17/2026,10:30 AM,30,"Smith, John",12/12/1972,300103,415-555-0152,"Lin, Mei MD",Mission Bay,FOLLOW UP,Confirmed
+11/18/2026,4:00 PM,15,"Johnson, Ava",03/30/2001,300104,415-555-0153,"Ortiz, Sam NP",Mission Bay,SICK VISIT,Scheduled
+11/19/2026,2:00 PM,30,"Lee, Kevin",10/10/1985,300105,415-555-0154,"Chen, Ana MD",Mission Bay,FOLLOW UP,Cancelled
+11/20/2026,9:00 AM,30,"Okoro, Ada",06/16/1993,300106,415-555-0155,"Park, Dana MD",Mission Bay,NEW SPEC,No Show

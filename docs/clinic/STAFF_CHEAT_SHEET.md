@@ -12,8 +12,29 @@
 | 2 | Check **red Escalated** items first. | Urgent alerts |
 | 3 | Work the **amber** items: book each one. | Confirm queue |
 | 4 | Glance at new referrals; make sure SMS consent is "Yes". | Referrals |
-| 5 | Upload the eCW appointment export, if it's your day. | Ingest |
+| 5 | Import the eCW schedule (morning, and again after lunch if you can). See below. | eCW import |
 | 6 | Log out (or lock the screen) when you step away. | — |
+
+## Daily eCW schedule import (5 minutes)
+
+Relay can't see eCW by itself. This upload tells it what you booked, cancelled or no-showed in eCW, so it stops texting patients who are booked and offers new times to patients whose visit was cancelled. **Relay only reads the file — it never changes anything in eCW.**
+
+1. In eCW, run **[eCW report name]** for **today through the next 14 days**. Export as **CSV** (or Excel .xlsx). Save it to the clinic computer, not a personal device.
+2. In Relay, open **eCW import** and drop the file in.
+3. **Match the columns** — the first time only: check each dropdown shows the right column (the grey "e.g." text helps). Tick **Save this column mapping**. Next time it's automatic.
+4. **Read the preview.** Nothing has changed yet. Check the **Changes** tab: "Mark Booked", "Update time", "Back to outreach".
+5. Click **Apply**.
+6. **Needs review** rows (amber): pick the right referral or click **Ignore this row**. Relay never guesses when two referrals could match.
+7. Delete the downloaded file from the computer.
+
+| You see | What it means | What you do |
+|---|---|---|
+| Amber "**schedule data may be stale**" on the dashboard or confirm queue | No import for ~24 hours | Do the import now |
+| Amber **No show in eCW — call first** | The patient missed the visit. Relay put the referral back in outreach but **won't text** until you've called. | Call the patient. If texting is OK, resume it on the referral page. |
+| Amber **Rescheduled in eCW — check new time** | eCW says rescheduled but the new time wasn't in the file | Check eCW. If there's a new time, it will show up in the next import. |
+| "Cancelled → back to outreach" | Relay texts the patient new times (within texting hours) | Nothing — watch the confirm queue |
+
+**Can't find the report?** In eCW, look under **Reports** (or the Appointments / Resource Schedule screen) for an **appointment list / appointment report** you can run for a date range and **export to Excel/CSV**. It must have: appointment date, start time, patient name, date of birth, and ideally Account No/MRN, provider, and status. Ask **[eCW admin name]** to save it as a favorite so it's one click.
 
 ## Amber vs. red — they mean different things
 

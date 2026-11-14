@@ -68,6 +68,64 @@ Endpoints: `GET/POST/PATCH /api/referrals/:id/sms`, `POST /api/referrals/:id/sms
 and two **public, self-authenticating** routes: `POST /api/sms/inbound` (SNS) and
 `POST /api/sms/outreach/tick` (bearer `OUTREACH_CRON_TOKEN` or an admin session).
 
+## eCW schedule import
+
+For the pilot the clinic's eClinicalWorks schedule reaches Relay as an **appointment report export
+(CSV or .xlsx)** that staff upload once or twice a day at `/schedule-import` (sidebar **eCW import**).
+Connector mode: Relay only reads the file and updates its own mirror; **nothing is ever written to eCW.**
+Staff routine: `docs/clinic/STAFF_CHEAT_SHEET.md`. Sample file (fake patients matching the seed):
+`test/fixtures/ecw-appointments-sample.csv`.
+
+Flow: upload → server parses (≤ 5 MB, ≤ 5,000 rows) → **draft** with auto-guessed column mapping (or a saved
+profile whose headers all appear in the file) → **dry-run preview** per row → staff adjust dropdowns /
+re-preview → **Apply** (one transaction) → SMS follow-ups after commit → review list for unclear rows.
+
+| File | Role |
+|---|---|
+| `db/migrations/003_ecw_import.sql` | `patients.mrn`; `appointments.source / ecw_appt_key / visit_status`; `ecw_import_profiles`, `ecw_imports`, `ecw_appointments`, `ecw_busy_slots`, `ecw_import_review` |
+| `src/lib/ecwImport.ts` | Mappable fields + labels, header auto-guess, required-field check, stale rule (pure, shared with the screen) |
+| `src/server/import/parse.ts` | CSV (`csv-parse`) / .xlsx (`read-excel-file`) → header + string cells; skips title rows above the header |
+| `src/server/import/normalize.ts` | Dates (MM/DD/YYYY, ISO, month names, Excel serials, 2-digit years), 12/24 h times, "Last, First" names, MRN/phone keys, eCW status codes → category, appointment identity |
+| `src/server/import/plan.ts` | Matching tiers and the per-referral action rules (pure; what the preview shows is what Apply does) |
+| `src/server/import/service.ts` | Drafts, preview, apply, review decisions, history, freshness — all SQL + audit rows |
+| `src/server/import/index.ts` | Route-facing wrapper; runs SMS follow-ups after the commit |
+| `src/app/api/schedule-import/**` | `GET/POST /api/schedule-import`, `GET/DELETE /:id`, `POST /:id/preview`, `POST /:id/apply`, `POST /review/:itemId`, `GET /status`, `GET /taken-slots` (all `withAuth`, MA + admin) |
+| `src/app/(app)/schedule-import/page.tsx`, `src/components/screens/schedule-import/*` | Screen: upload, mapping, preview, history + review |
+| `src/components/shared/ScheduleFreshnessBanner.tsx` | Amber "schedule data may be stale" strip (dashboard + confirm queue) |
+
+**Matching** (never guesses): previously linked eCW appointment → exact MRN/Account No (a different DOB → review)
+→ DOB + first/last name → DOB + phone. Several referrals at one tier → review (unless exactly one is booked at
+that exact time). Partial signal (same DOB, different name; same name, different DOB; MRN mismatch) → review.
+No signal → "not in Relay": counted, never stored, never turned into a referral.
+
+**Actions** (one change per referral per file; eCW wall-clock times in `CLINIC_TIMEZONE`):
+
+| eCW row | Relay referral | Apply does |
+|---|---|---|
+| Scheduled / Confirmed / Pending | not Booked | **Booked** ("Booked via eCW import by <user>"), confirmed appointment mirrored to the calendar, captured slot expired, held texts suppressed, moot amber items resolved; if it was Pending Confirmation the patient gets `booked_confirmation` (same rule as the MA's Confirm) |
+| Scheduled, different time | Booked | mirrored appointment time updated |
+| Scheduled, same time | Booked | nothing |
+| Arrived / Checked In / Checked Out / Completed | any | visit recorded on the appointment (`visit_status`; there is no "completed" referral state); booked first if needed |
+| Cancelled | Booked **at that time** | back to **In Progress**, appointment cancelled, texting cycle reset (identity re-check), `cancellation_reoffer` sent by `afterAppointmentCancelled()` (counts toward the lifetime cap of 6; held in quiet hours; amber `ecw_cancelled` if the cap is used up) |
+| No Show | Booked at that time | back to In Progress + amber `ecw_no_show`, **texting paused** — staff call first |
+| Rescheduled, no new time in the file | Booked at that time | back to In Progress + amber `ecw_rescheduled`, texting paused |
+| Cancelled / No Show for an older time | — | nothing (never undoes a newer booking) |
+| Any change for an **Escalated** referral, or an unknown status | — | review |
+
+Idempotency: re-importing overlapping dates changes nothing twice (decisions compare against Relay's current
+state; eCW appointments are keyed by appointment ID, else MRN + local date/time + provider; review items are not
+duplicated and rows staff ignored stay ignored; a draft can be applied once).
+
+**Taken times:** scheduled/arrived rows for the chosen providers (default: providers seeing referral patients in
+the file) are stored in `ecw_busy_slots` **without patient identity** and replace the covered date range on each
+import. `sms/repo.takenSlots()` (SMS agent) and `data.getBookedSlotKeys()` (voice) treat any grid time that
+overlaps them (`SLOT_LENGTH_MIN` = 30) as taken.
+
+**What is kept:** the raw file is never stored. Parsed cells live on the draft only until it is applied,
+discarded or 24 h old. After apply: counts, date range, file name + SHA-256, matched appointments, review rows
+(that row's mapped fields only) and anonymous busy times. Every mutation writes `audit_log` with the acting user;
+no patient data is logged. `ECW_IMPORT_STALE_HOURS` (default 24) controls the stale warning.
+
 ## Production (AWS)
 
 Deployed as a container on **ECS Fargate** behind an HTTPS load balancer, with a private RDS Postgres.

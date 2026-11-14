@@ -4,7 +4,7 @@
 import 'server-only';
 import { createDb, type Db } from './driver';
 import { runMigrations } from './migrate';
-import { seedIfEmpty } from './seed';
+import { backfillSeedMrns, seedIfEmpty } from './seed';
 
 export type { Db, Queryable } from './driver';
 
@@ -19,8 +19,9 @@ async function init(): Promise<Db> {
   if (process.env.NODE_ENV !== 'production' || process.env.DB_AUTO_MIGRATE === 'true') {
     const ran = await runMigrations(db);
     if (ran.length) console.log(`[db] applied migrations: ${ran.join(', ')}`);
-    if (process.env.NODE_ENV !== 'production' && (await seedIfEmpty(db))) {
-      console.log('[db] empty database seeded with fake data');
+    if (process.env.NODE_ENV !== 'production') {
+      if (await seedIfEmpty(db)) console.log('[db] empty database seeded with fake data');
+      await backfillSeedMrns(db);
     }
   }
   return db;

@@ -16,7 +16,9 @@ import type {
   Org, CurrentUser, DashboardFunnelStep, DashboardHealthSignals,
   Priority, ReferralLogEntry, PracticeSettings, DashboardCallActivity, RawSettings,
   SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, OutreachTickResult,
+  EcwImportOverview, EcwImportStatus, EcwImportDraft, EcwApplyResult, EcwImportDetail,
 } from './types';
+import type { EcwImportOptions, EcwMapping } from './ecwImport';
 
 export { normalizeTime };
 
@@ -73,9 +75,13 @@ export async function getCurrentUser(): Promise<CurrentUser> {
 // ── Booked slot keys ─────────────────────────────────────────────────────────
 // Returns a Set of "DDD Mon D|H:MM AM" keys for all captured + confirmed slots.
 // Used by callUtils to filter already-booked times out of the available_slots list.
+// Includes times already taken in eCW (from the last schedule import), the same list the SMS agent uses.
 export async function getBookedSlotKeys(): Promise<Set<string>> {
-  const referrals = await getReferrals();
-  return takenSlotKeys(referrals.flatMap(r => [r.capturedSlot, r.bookedAppointment]));
+  const [referrals, taken] = await Promise.all([
+    getReferrals(),
+    api<{ day: string; time: string }[]>('/schedule-import/taken-slots').catch(() => []),
+  ]);
+  return takenSlotKeys([...referrals.flatMap(r => [r.capturedSlot, r.bookedAppointment]), ...taken]);
 }
 
 // ── Referrals ────────────────────────────────────────────────────────────────
@@ -311,6 +317,60 @@ export async function getOutreachSettings(): Promise<OutreachSettingsView> {
 /** Admin only. Throws ApiError (status 403) for non-admins. */
 export async function saveOutreachSettings(s: OutreachSettings): Promise<OutreachSettingsView> {
   return api<OutreachSettingsView>('/sms/settings', { method: 'PUT', body: s });
+}
+
+// ── eCW schedule import (connector mode: Relay reads the eCW schedule, never writes to it) ──
+
+/** Import history, freshness status and saved column mappings. */
+export async function getScheduleImports(): Promise<EcwImportOverview> {
+  return api<EcwImportOverview>('/schedule-import');
+}
+
+/** When the eCW schedule was last imported (stale warning on the dashboard / confirm queue). */
+export async function getScheduleImportStatus(): Promise<EcwImportStatus> {
+  return api<EcwImportStatus>('/schedule-import/status');
+}
+
+/** Uploads a .csv/.xlsx eCW appointment report. Parsed on the server; returns a draft + dry-run preview. Changes nothing. */
+export async function uploadScheduleFile(file: File): Promise<EcwImportDraft> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/api/schedule-import', { method: 'POST', body: form, cache: 'no-store' });
+  if (res.status === 401 && typeof window !== 'undefined') {
+    window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, typeof data?.error === 'string' ? data.error : `Upload failed (${res.status})`);
+  }
+  return res.json() as Promise<EcwImportDraft>;
+}
+
+/** Dry run again with adjusted column mapping / options. Changes nothing. */
+export async function previewScheduleImport(importId: string, mapping: EcwMapping, options: EcwImportOptions): Promise<EcwImportDraft> {
+  return api<EcwImportDraft>(`/schedule-import/${encodeURIComponent(importId)}/preview`, { method: 'POST', body: { mapping, options } });
+}
+
+/** Applies the import (optionally saving the mapping as a reusable profile). */
+export async function applyScheduleImport(
+  importId: string, mapping: EcwMapping, options: EcwImportOptions, saveProfileName?: string,
+): Promise<EcwApplyResult> {
+  return mutate<EcwApplyResult>(`/schedule-import/${encodeURIComponent(importId)}/apply`, 'POST', { mapping, options, saveProfileName });
+}
+
+export async function discardScheduleImport(importId: string): Promise<{ success: boolean }> {
+  return mutate(`/schedule-import/${encodeURIComponent(importId)}`, 'DELETE');
+}
+
+export async function getScheduleImportDetail(importId: string): Promise<EcwImportDetail> {
+  return api<EcwImportDetail>(`/schedule-import/${encodeURIComponent(importId)}`);
+}
+
+/** Staff decision on a review row: match it to a referral, or ignore it. */
+export async function resolveScheduleReviewItem(
+  itemId: string, decision: { action: 'match'; referralId: string } | { action: 'ignore' },
+): Promise<{ success: boolean; outcome?: string; errorMsg?: string }> {
+  return mutate(`/schedule-import/review/${encodeURIComponent(itemId)}`, 'POST', decision);
 }
 
 /** Admin only: run the outreach scheduler once now (the same job EventBridge runs on a schedule). */

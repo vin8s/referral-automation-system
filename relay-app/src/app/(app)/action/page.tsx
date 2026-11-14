@@ -7,6 +7,7 @@ import { Avatar } from '@/components/shared/Avatar';
 import { Icon } from '@/components/shared/Icon';
 import { TranscriptPanel } from '@/components/shared/TranscriptPanel';
 import { SmsThread } from '@/components/shared/SmsThread';
+import { ScheduleFreshnessBanner } from '@/components/shared/ScheduleFreshnessBanner';
 import { getConfirmQueue, confirmSlot, rejectSlot } from '@/lib/data';
 import type { ConfirmQueueItem } from '@/lib/types';
 
@@ -286,6 +287,8 @@ export default function ActionPage() {
           )}
         </div>
       </PageHead>
+
+      <ScheduleFreshnessBanner />
 
       <div className="alerts-strip calm" style={{ marginBottom: 16 }}>
         <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--relay-accent-50)', color: 'var(--relay-accent-700)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
