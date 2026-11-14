@@ -140,6 +140,10 @@ export class RelayStack extends Stack {
     })) {
       if (value) Annotations.of(this).addWarningV2(`relay:${key}`, `relay:${key} is still the placeholder value in infra/cdk.json. Set it before deploying.`);
     }
+    if (!cfg.smsOriginationIdentity) {
+      Annotations.of(this).addWarningV2('relay:smsOriginationIdentity',
+        'relay:smsOriginationIdentity is blank in infra/cdk.json: Relay cannot send texts (each send fails) until you set the phone number ID and deploy again.');
+    }
 
     // ── Encryption key for data at rest (database, secrets, logs, SNS, SQS) ──
     const dataKey = new kms.Key(this, 'DataKey', {
