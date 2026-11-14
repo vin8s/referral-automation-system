@@ -105,8 +105,8 @@ export function readConfig(scope: IConstruct): RelayConfig {
     cognitoDomainPrefix: str('cognitoDomainPrefix', 'relay-clinic-change-me').toLowerCase(),
     clinicLoginName: str('clinicLoginName', 'Rhode Island Free Clinic'),
     alertEmail: str('alertEmail', 'owner@example.org'),
-    clinicTimeZone: str('clinicTimeZone', 'America/Los_Angeles'),
-    clinicDisplayName: str('clinicDisplayName', 'Example Free Clinic'),
+    clinicTimeZone: str('clinicTimeZone', 'America/New_York'),
+    clinicDisplayName: str('clinicDisplayName', 'Rhode Island Free Clinic'),
     clinicPhoneNumber: str('clinicPhoneNumber'),
     smsOriginationIdentity: str('smsOriginationIdentity'),
     bedrockModelId: str('bedrockModelId', 'us.anthropic.claude-haiku-4-5-20251001-v1:0'),
@@ -139,6 +139,10 @@ export class RelayStack extends Stack {
       alertEmail: cfg.alertEmail.endsWith('example.org'),
     })) {
       if (value) Annotations.of(this).addWarningV2(`relay:${key}`, `relay:${key} is still the placeholder value in infra/cdk.json. Set it before deploying.`);
+    }
+    if (!cfg.smsOriginationIdentity) {
+      Annotations.of(this).addWarningV2('relay:smsOriginationIdentity',
+        'relay:smsOriginationIdentity is blank in infra/cdk.json: Relay cannot send texts (each send fails) until you set the phone number ID and deploy again.');
     }
 
     // ── Encryption key for data at rest (database, secrets, logs, SNS, SQS) ──
@@ -204,7 +208,7 @@ export class RelayStack extends Stack {
         parameters: { 'rds.force_ssl': '1' }, // refuse unencrypted connections
       }),
       backupRetention: Duration.days(14),
-      preferredBackupWindow: '09:00-09:30', // UTC = ~1–2 AM Pacific
+      preferredBackupWindow: '09:00-09:30', // UTC = 4–5 AM Eastern (clinic closed)
       preferredMaintenanceWindow: 'sun:10:00-sun:10:30',
       copyTagsToSnapshot: true,
       autoMinorVersionUpgrade: true,
@@ -338,7 +342,7 @@ export class RelayStack extends Stack {
       retentionPeriod: Duration.days(14),
     });
     const inboundTopic = new sns.Topic(this, 'InboundSmsTopic', {
-      topicName: 'relay-inbound-sms',
+      topicName: 'relay-inbound-sms', // also hard-coded in the key policy statement below
       displayName: 'Relay inbound SMS',
       masterKey: dataKey,
       enforceSSL: true,
@@ -357,6 +361,19 @@ export class RelayStack extends Stack {
       actions: ['kms:GenerateDataKey*', 'kms:Decrypt'],
       resources: ['*'],
       conditions: { StringEquals: { 'aws:SourceAccount': Aws.ACCOUNT_ID } },
+    }));
+    // SNS must also use the key to write undeliverable texts into the KMS-encrypted
+    // dead-letter queue; without this the redrive silently fails and the
+    // "inbound-sms-undelivered" alarm never fires. The topic ARN is built from its
+    // fixed name (a token reference would make a Key ↔ Topic dependency cycle).
+    dataKey.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowSnsToUseKeyForInboundDeadLetters',
+      principals: [new iam.ServicePrincipal('sns.amazonaws.com')],
+      actions: ['kms:GenerateDataKey*', 'kms:Decrypt'],
+      resources: ['*'],
+      conditions: {
+        ArnEquals: { 'aws:SourceArn': `arn:${Aws.PARTITION}:sns:${Aws.REGION}:${Aws.ACCOUNT_ID}:relay-inbound-sms` },
+      },
     }));
     const smsConfigSet = new smsvoice.CfnConfigurationSet(this, 'SmsConfigurationSet', {
       configurationSetName: 'relay-sms',

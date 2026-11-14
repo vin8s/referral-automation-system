@@ -91,6 +91,8 @@ export interface Referral {
   id: string;
   patient: Patient;
   reason: string;
+  /** Appointment specialty (e.g. "Primary care"). Texted only after DOB verification. */
+  specialty?: string;
   referringProvider: string;
   referralSource: string;
   referralTime: string;

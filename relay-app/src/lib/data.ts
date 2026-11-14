@@ -197,6 +197,7 @@ export interface IngestReferralInput {
   language?: string;
   insurance?: string;
   reason?: string;
+  specialty?: string;
   referringProvider?: string;
   priority?: Priority;
   location?: string;

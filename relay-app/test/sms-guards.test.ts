@@ -92,7 +92,9 @@ describe('model output validation (SMS_AGENT_PROMPT §4)', () => {
   it('rejects junk and missing fields', () => {
     expect(validateModelOutput(null).ok).toBe(false);
     expect(validateModelOutput({ reply_text: 'x' }).ok).toBe(false);
-    expect(validateModelOutput(out({ reply_text: 'x'.repeat(301) })).ok).toBe(false);
+    expect(validateModelOutput(out({ reply_text: 'x'.repeat(460) })).ok).toBe(false);
+    // A little over the 300-character target is fine (up to 3 segments / 459 characters).
+    expect(validateModelOutput(out({ reply_text: 'x'.repeat(400) })).ok).toBe(true);
   });
   it('rejects tier/reason mismatches', () => {
     expect(validateModelOutput(out({ escalation: { tier: 'red', reason_code: 'complaint', pause_automation: true, staff_summary: null } })).ok).toBe(false);
@@ -163,7 +165,7 @@ describe('outbound guard', () => {
     ['Your cardiology visit', 'referral detail'],
     ['How about 11:00 AM?', 'time not in offered slots'],
     ['Great 🙂', 'emoji'],
-    ['x'.repeat(400), 'too long (3 segments)'],
+    ['x'.repeat(500), 'too long (4 segments)'],
   ])('rejects: %s', (text, problem) => {
     expect(validateOutgoing(text, ctx)).toContain(problem);
   });
@@ -179,9 +181,9 @@ describe('templates + segments', () => {
     expect(t.encoding).toBe('GSM-7');
     expect(t.segments).toBeLessThanOrEqual(2);
   });
-  it('first outreach discloses AI and asks only for DOB', () => {
-    const t = renderTemplate('first_outreach', 'en', { patient_first_name: 'Grace', clinic_name: 'Community Health Clinic' });
-    expect(t.text).toContain('(AI)');
+  it('first outreach uses the owner-approved wording and asks only for DOB', () => {
+    const t = renderTemplate('first_outreach', 'en', { patient_first_name: 'Grace', clinic_name: 'Rhode Island Free Clinic' });
+    expect(t.text).toBe('Hi Grace, this is the scheduling team at Rhode Island Free Clinic. Your provider asked us to help you make an appointment. To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.');
     expect(t.text).toContain('date of birth');
     expect(t.segments).toBe(2);
   });
@@ -193,5 +195,18 @@ describe('templates + segments', () => {
   it('counts UCS-2 when a non-GSM accent is present', () => {
     expect(measureSms('sábado').encoding).toBe('UCS-2');
     expect(measureSms('miércoles').encoding).toBe('GSM-7');
+  });
+});
+
+describe('specialty phrase', () => {
+  it('sanitizes staff input so it can never carry digits, links or punctuation', async () => {
+    const { specialtyPhrase } = await import('@/server/sms/specialty');
+    expect(specialtyPhrase('Primary care', 'en')).toBe(' for your primary care appointment');
+    expect(specialtyPhrase('OB/GYN', 'en')).toBe(' for your OB/GYN appointment');
+    const nasty = specialtyPhrase('call 401-555-0100 www.x.com', 'en');
+    expect(nasty).not.toMatch(/[0-9.:/]/);
+    expect(nasty.length).toBeLessThan(70);
+    expect(specialtyPhrase('', 'en')).toBe('');
+    expect(specialtyPhrase(null, 'es')).toBe('');
   });
 });

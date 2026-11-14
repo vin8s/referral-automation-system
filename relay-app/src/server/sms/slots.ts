@@ -76,3 +76,45 @@ export function buildOfferedSlots(opts: {
   }
   return out;
 }
+
+/**
+ * Every free slot on the next `days` weekdays (starting tomorrow, clinic time), in time order.
+ * The AI suggests from this pool when none of the first offered times work.
+ */
+export function buildOpenSlotPool(opts: {
+  now: Date;
+  takenKeys: Set<string>;
+  excludeKeys?: Set<string>;
+  providers: string[];
+  days?: number;
+  tz?: string;
+}): OfferedSlot[] {
+  const tz = opts.tz ?? clinicTimeZone();
+  const want = opts.days ?? 10;
+  const today = zonedParts(opts.now, tz);
+  const out: OfferedSlot[] = [];
+  let weekdays = 0;
+  for (let i = 1; i <= 30 && weekdays < want; i++) {
+    const d = new Date(Date.UTC(today.year, today.month - 1, today.day + i));
+    const y = d.getUTCFullYear(), mo = d.getUTCMonth() + 1, da = d.getUTCDate(), dow = d.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    weekdays++;
+    const dayKey = dayKeyOf(y, mo, da);
+    for (const time of ALL_SLOT_TIMES) {
+      const k = slotKey(dayKey, time);
+      if (opts.takenKeys.has(k) || opts.excludeKeys?.has(k)) continue;
+      const { h, m } = parseTime(time);
+      const [hm, ampm] = time.split(' ');
+      out.push({
+        slot_id: slotIdFor(dayKey, time),
+        start: offsetIso(zonedTimeToUtc(y, mo, da, h, m, tz), tz),
+        provider: opts.providers.length ? opts.providers[out.length % opts.providers.length] : 'Clinic provider',
+        label_en: `${DAY_EN[dow]}, ${MON_EN[mo - 1]} ${da} at ${time}`,
+        label_es: `${DAY_ES[dow]} ${da} de ${MON_ES[mo - 1]}, ${hm} ${ampm === 'AM' ? 'a. m.' : 'p. m.'}`,
+        day: dayKey,
+        time,
+      });
+    }
+  }
+  return out;
+}

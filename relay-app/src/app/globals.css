@@ -16,6 +16,10 @@
   --relay-accent-700: #0f766e;
   --relay-accent-800: #115e59;
 
+  /* Go — green, reserved for the single primary "run outreach" action */
+  --relay-go: #16a34a;
+  --relay-go-700: #15803d;
+
   /* Two-tier urgency: amber = "needs human" (never merge with Escalated red) */
   --relay-urgent: #d97706;
   --relay-urgent-50: #fffbeb;
@@ -318,7 +322,7 @@
   .sb-brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 14px; border-bottom: 1px solid var(--relay-hairline); margin-bottom: 10px; }
   .sb-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--relay-accent); color: white; font-weight: 700; font-size: 14px; display: grid; place-items: center; letter-spacing: -0.02em; flex-shrink: 0; }
   .sb-name { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; color: var(--relay-ink); }
-  .sb-sub { color: var(--relay-ink-3); font-size: 11px; margin-top: 1px; }
+  .sb-sub { color: var(--relay-ink-3); font-size: 11px; line-height: 1.35; margin-top: 1px; }
   .sb-section { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--relay-ink-4); padding: 12px 10px 6px; font-weight: 600; }
   .sb-spacer { flex: 1; }
 
@@ -381,6 +385,10 @@
   .btn-primary:hover { background: var(--relay-accent-700); }
   .btn-ghost { background: transparent; border-color: transparent; color: var(--relay-ink-2); }
   .btn-ghost:hover { background: var(--relay-tint); border-color: var(--relay-hairline); }
+  .btn-go { background: var(--relay-go); color: white; border-color: var(--relay-go-700); font-weight: 600; }
+  .btn-go:hover { background: var(--relay-go-700); }
+  .btn-go:disabled { opacity: .7; cursor: progress; }
+  .btn-lg { padding: 11px 22px; font-size: 15px; border-radius: 9px; gap: 8px; }
   .btn-danger { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
   .btn-danger:hover { background: #fecaca; }
   .btn-link { background: none; border: none; padding: 0; color: var(--relay-accent); font-size: inherit; cursor: pointer; text-decoration: underline; }

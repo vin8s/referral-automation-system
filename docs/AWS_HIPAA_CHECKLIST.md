@@ -12,7 +12,7 @@ Infrastructure definition: `infra/lib/relay-stack.ts`. Deployment steps: `docs/A
 
 | Item | Status | Notes |
 |---|---|---|
-| AWS Business Associate Addendum accepted in **AWS Artifact** | ⬜ Not yet (no account yet) | Guide Part 1, step 4. Record the date in `docs/clinic/VENDOR_BAA_TRACKER.md`. Covers only HIPAA-eligible services. |
+| AWS Business Associate Addendum accepted in **AWS Artifact** | ✅ Active (2026-11-13) | **AWS Organizations BAA**, accepted in the management account and verified Active from the Relay account 000755994402 (see `docs/clinic/VENDOR_BAA_TRACKER.md`). Guide Part 1, step 4. Covers only HIPAA-eligible services. |
 | Clinic ↔ owner agreement (BAA or volunteer confidentiality) | ⬜ | See `VENDOR_BAA_TRACKER.md`. |
 | Account owned by the clinic (Route A) or owner's LLC (Route B) | ⬜ | `CLINIC_LAUNCH_PLAN.md` Phase 1. |
 
@@ -22,13 +22,13 @@ Infrastructure definition: `infra/lib/relay-stack.ts`. Deployment steps: `docs/A
 
 | Service | What Relay uses it for | PHI? | HIPAA eligible? | Encryption | Logging / audit | Backups | Access |
 |---|---|---|---|---|---|---|---|
-| **Amazon ECS on AWS Fargate** | Runs the Relay container | Yes (in memory) | ✅ Yes ("Amazon ECS"; "AWS Fargate – ECS and EKS engines only") | TLS in transit (ALB → task over the VPC; app → AWS APIs over HTTPS); Fargate ephemeral storage encrypted by AWS | App logs → CloudWatch `/relay/app` (no patient data by design: `src/server/log.ts`) | Stateless (image in ECR) | Task role: only `sms-voice:SendTextMessage` + `bedrock:InvokeModel*`; inbound only from the ALB security group |
+| **Amazon ECS on AWS Fargate** | Runs the Relay container | Yes (in memory) | ✅ Yes ("Amazon ECS"; "AWS Fargate – ECS and EKS engines only") | TLS in transit (ALB → task over the VPC; app → AWS APIs over HTTPS); Fargate ephemeral storage encrypted by AWS | App logs → CloudWatch `/relay/app` (no patient data by design: `src/server/log.ts`) | Stateless (image in ECR) | Task role: only `sms-voice:SendTextMessage` / `SendRcsMessage` + `bedrock:InvokeModel*`; inbound only from the ALB security group |
 | **Elastic Load Balancing (ALB)** | HTTPS front door | Yes (in transit) | ✅ Yes | TLS 1.2/1.3 (`RECOMMENDED_TLS` policy), HTTP → HTTPS redirect, ACM certificate; invalid headers dropped | Access logs → S3 (365 days) | n/a | Public on 80/443 only |
 | **Amazon RDS for PostgreSQL** | Database | **Yes** | ✅ Yes (PostgreSQL engine listed) | At rest: KMS key `alias/relay-data`; in transit: `rds.force_ssl=1`, app verifies the RDS CA (`DATABASE_SSL=verify`) | CloudTrail for admin actions; Postgres logs not exported (avoids PHI in logs) | Automated daily backups, 14 days + point-in-time restore; final snapshot on delete; deletion protection on | **Not publicly accessible**; isolated subnets with no internet route; security group allows only the app |
 | **Amazon Cognito** | Staff login | Staff identities only | ✅ Yes | AWS-managed | Sign-in events in CloudTrail; app writes `audit_log` rows | AWS-managed; pool retained on teardown | No self sign-up; **MFA required** (authenticator app, no SMS); 12+ char passwords (all classes, last 5 not reused); temp passwords expire in 3 days; groups `admin` / `ma`; Relay session 30 min idle / 8 h max (automatic logoff). User management: `docs/STAFF_LOGINS.md` |
 | **Amazon Bedrock** (Claude) | Writes SMS reply drafts | **Yes** (message text) | ✅ Yes | TLS; Bedrock doesn't use prompts to train models | CloudTrail (model invocation logging **off**, so prompts aren't stored) | n/a | Task role limited to Anthropic Claude models / inference profiles |
 | **AWS End User Messaging SMS** | Sends/receives texts | **Yes** (phone + text) | ✅ Yes ("Amazon Pinpoint and End User Messaging"; voice + WhatsApp excluded; Relay is SMS-only) | TLS to AWS; **SMS over carrier networks is not encrypted** → no medical details in texts (`docs/SMS_TEMPLATES.md`) | CloudTrail | n/a | Registered clinic number; consent + STOP handling |
-| **Amazon SNS** | Delivers inbound texts to Relay | **Yes** | ✅ Yes | Topic encrypted with KMS key; HTTPS-only delivery; `enforceSSL` | Delivery failures → SQS dead-letter queue + alarm | n/a | Topic policy: only End User Messaging (same account) may publish |
+| **Amazon SNS** | Delivers inbound texts to Relay | **Yes** | ✅ Yes | Topic encrypted with KMS key; HTTPS-only delivery; `enforceSSL` | Delivery failures → SQS dead-letter queue + alarm (key policy lets SNS write to the encrypted queue) | n/a | Topic policy: only End User Messaging (same account) may publish |
 | **Amazon SQS** | Dead-letter queue for undelivered inbound texts | **Yes** | ✅ Yes ("Amazon Simple Queue Service") | KMS key; SSL enforced | Alarm when non-empty | Messages kept 14 days | Account-only |
 | **AWS Lambda** | Outreach tick caller | No (sends a token, reads only the HTTP status) | ✅ Yes | Env vars encrypted with KMS key | `/relay/outreach-tick` (status code only) | n/a | Can only read the outreach token secret |
 | **Amazon EventBridge Scheduler** | Triggers the outreach tick | No | ⚠️ "Amazon EventBridge" is listed; **Scheduler is not named separately** | n/a | CloudTrail | n/a | Invokes only the tick Lambda. Carries **no PHI**, so this is acceptable either way (services not on the list may be used if they don't touch PHI) |
@@ -53,7 +53,7 @@ NAT Gateway (cost), WAF (optional later, ~$6+/month).
 
 | ✅/⬜ | Check | How to verify |
 |---|---|---|
-| ⬜ | AWS BAA accepted and recorded | AWS Artifact → Agreements → Active |
+| ✅ | AWS BAA accepted and recorded (Organizations BAA, 2026-11-13) | AWS Artifact → Agreements → Active |
 | ⬜ | Root user has MFA, no access keys | IAM → Security credentials |
 | ⬜ | Daily admin via IAM Identity Center with MFA | Identity Center → Settings → Authentication |
 | ⬜ | Region is us-east-2 (Ohio) for everything (the project's home Region; other Regions are blocked by the organization's Region-restriction SCP) | Resource lists |

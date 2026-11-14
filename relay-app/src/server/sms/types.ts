@@ -83,6 +83,8 @@ export interface TurnContext {
   referring_provider: string | null;
   location_short: string | null;
   offered_slots: { slot_id: string; start: string; provider: string | null; label_en: string; label_es: string }[];
+  /** Other free times (next 10 weekdays) to suggest when the offered ones don't work. */
+  more_open_slots?: { slot_id: string; label_en: string; label_es: string }[];
   captured_slot_id: string | null;
   booked_appointment: { label: string } | null;
   redirects_used: number;
@@ -101,4 +103,6 @@ export interface ModelInput {
   history: HistoryTurn[];
   patientMessage: string;
   context: TurnContext;
+  /** Set by code on a second attempt: what was wrong with the previous sms_turn output. */
+  correction?: string;
 }

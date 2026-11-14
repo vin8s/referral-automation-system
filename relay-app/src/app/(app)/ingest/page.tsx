@@ -12,6 +12,7 @@ import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
 import { ingestReferrals } from '@/lib/data';
 import type { IngestReferralInput } from '@/lib/data';
+import { SPECIALTY_HELP, SPECIALTY_MAX_LEN, SPECIALTY_SUGGESTIONS } from '@/lib/specialties';
 
 // ── Column header normalisation ───────────────────────────────────────────────
 
@@ -34,6 +35,9 @@ const COL_MAP: Record<string, keyof ParsedRow> = {
   // reason
   'reason': 'reason', 'referral reason': 'reason', 'reason for referral': 'reason',
   'diagnosis': 'reason', 'dx': 'reason', 'chief complaint': 'reason',
+  // specialty (the appointment being scheduled; texted only after DOB verification)
+  'specialty': 'specialty', 'speciality': 'specialty', 'department': 'specialty', 'referred to': 'specialty',
+  'service': 'specialty',
   // referring provider
   'referring provider': 'referringProvider', 'referring physician': 'referringProvider',
   'provider': 'referringProvider', 'referred by': 'referringProvider',
@@ -149,12 +153,12 @@ function parseRows(sheetRows: Record<string, unknown>[], existingPhones: Set<str
 function downloadTemplate() {
   const headers = [
     'Patient Name', 'Date of Birth', 'Phone', 'Sex', 'Language',
-    'Insurance', 'Reason', 'Referring Provider', 'Priority', 'Location',
+    'Insurance', 'Reason', 'Specialty', 'Referring Provider', 'Priority', 'Location',
     'SMS Consent', 'Consent Source',
   ];
   const example = [
     'Jane Smith', '03/15/1962', '(415) 555-0101', 'F', 'English',
-    'Aetna', 'AFib follow-up', 'Dr. Chen', 'normal', 'Mission Bay',
+    'Aetna', 'AFib follow-up', 'Primary care', 'Dr. Chen', 'normal', 'Providence',
     'yes', 'intake form',
   ];
   const ws = xlsxUtils.aoa_to_sheet([headers, example]);
@@ -241,6 +245,7 @@ export default function IngestPage() {
       language: r.language,
       insurance: r.insurance,
       reason: r.reason,
+      specialty: r.specialty,
       referringProvider: r.referringProvider,
       priority: r.priority,
       location: r.location,
@@ -357,7 +362,7 @@ export default function IngestPage() {
         <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--relay-tint)', borderRadius: 'var(--relay-radius)', border: '1px solid var(--relay-hairline)' }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--relay-ink-2)', marginBottom: 6 }}>Recognised column headers</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', fontSize: 12 }}>
-            {['Patient Name', 'Date of Birth', 'Phone', 'Sex', 'Language', 'Insurance', 'Reason', 'Referring Provider', 'Priority', 'Location', 'SMS Consent', 'Consent Source'].map(h => (
+            {['Patient Name', 'Date of Birth', 'Phone', 'Sex', 'Language', 'Insurance', 'Reason', 'Specialty', 'Referring Provider', 'Priority', 'Location', 'SMS Consent', 'Consent Source'].map(h => (
               <span key={h} style={{ background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)', borderRadius: 4, padding: '1px 7px', color: 'var(--relay-ink-2)' }}>{h}</span>
             ))}
           </div>
@@ -485,7 +490,7 @@ export default function IngestPage() {
 
 const EMPTY_MANUAL = {
   patientName: '', dateOfBirth: '', phone: '', sex: '' as '' | 'M' | 'F', language: 'English', insurance: '',
-  reason: '', referringProvider: '', priority: 'normal' as 'normal' | 'urgent', smsConsent: false, smsConsentSource: '',
+  reason: '', specialty: '', referringProvider: '', priority: 'normal' as 'normal' | 'urgent', smsConsent: false, smsConsentSource: '',
 };
 
 function ManualEntry({ onCreated }: { onCreated: (count: number, consented: number) => void }) {
@@ -509,6 +514,7 @@ function ManualEntry({ onCreated }: { onCreated: (count: number, consented: numb
     const result = await ingestReferrals([{
       patientName: f.patientName.trim(), dateOfBirth: f.dateOfBirth.trim() || undefined, phone: normalisePhone(f.phone),
       sex: f.sex, language: f.language.trim() || 'English', insurance: f.insurance.trim(), reason: f.reason.trim(),
+      specialty: f.specialty.trim() || undefined,
       referringProvider: f.referringProvider.trim(), priority: f.priority,
       smsConsent: f.smsConsent, smsConsentSource: f.smsConsent ? f.smsConsentSource.trim() : undefined,
     }], 'manual');
@@ -518,10 +524,10 @@ function ManualEntry({ onCreated }: { onCreated: (count: number, consented: numb
     onCreated(result.importedCount, result.consentedCount);
   }
 
-  const input = (k: 'patientName' | 'dateOfBirth' | 'phone' | 'language' | 'insurance' | 'reason' | 'referringProvider', label: string, placeholder = '') => (
+  const input = (k: 'patientName' | 'dateOfBirth' | 'phone' | 'language' | 'insurance' | 'reason' | 'specialty' | 'referringProvider', label: string, placeholder = '', list?: string) => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span style={{ fontSize: 12, color: 'var(--relay-ink-3)' }}>{label}</span>
-      <input value={f[k]} placeholder={placeholder} onChange={e => set(k, e.target.value)}
+      <input value={f[k]} placeholder={placeholder} list={list} maxLength={k === 'specialty' ? SPECIALTY_MAX_LEN : undefined} onChange={e => set(k, e.target.value)}
         style={{ fontSize: 13, padding: '6px 9px', border: '1px solid var(--relay-hairline)', borderRadius: 6, background: 'var(--relay-surface)', color: 'var(--relay-ink)', fontFamily: 'inherit' }} />
     </label>
   );
@@ -539,6 +545,7 @@ function ManualEntry({ onCreated }: { onCreated: (count: number, consented: numb
         {input('dateOfBirth', 'Date of birth', 'MM/DD/YYYY')}
         {input('phone', 'Mobile phone *', '(415) 555-0101')}
         {input('reason', 'Referral reason *', 'AFib follow-up')}
+        {input('specialty', 'Specialty', 'Primary care', 'specialty-suggestions')}
         {input('referringProvider', 'Referring provider', 'Dr. Chen')}
         {input('insurance', 'Insurance')}
         {input('language', 'Preferred language')}
@@ -555,6 +562,11 @@ function ManualEntry({ onCreated }: { onCreated: (count: number, consented: numb
           </select>
         </label>
       </div>
+
+      <datalist id="specialty-suggestions">
+        {SPECIALTY_SUGGESTIONS.map(sp => <option key={sp} value={sp} />)}
+      </datalist>
+      <p style={{ fontSize: 12, color: 'var(--relay-ink-3)', margin: '8px 0 0' }}>Specialty: {SPECIALTY_HELP}</p>
 
       <div style={{ marginTop: 16, padding: '12px 14px', border: '1px solid var(--relay-hairline)', borderRadius: 'var(--relay-radius-sm)', background: 'var(--relay-tint)' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 500 }}>

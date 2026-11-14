@@ -140,6 +140,20 @@ export class MockSmsAgentModel implements SmsAgentModel {
       return out;
     }
     if (/\bnone\b|\bninguno\b|\bno (me )?sirve\b|\bdont work\b/.test(t)) {
+      const more = ctx.more_open_slots ?? [];
+      if (more.length) {
+        // Suggest other open times, preferring a weekday the patient named.
+        const days = DAY_NAMES.filter(([re]) => re.test(t)).map(([, d]) => d);
+        const dayOf = (label: string) => ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(label.slice(0, 3).toLowerCase());
+        const fit = days.length ? more.filter(s => days.includes(dayOf(s.label_en))) : [];
+        const pickList = (fit.length ? fit : more).slice(0, 3);
+        const es = out.language === 'es';
+        out.intent = 'availability_preference';
+        out.reply_text = (es ? 'Entiendo. Tambien tenemos:\n' : 'No problem. We also have:\n')
+          + pickList.map((s, i) => `${i + 1}) ${es ? s.label_es : s.label_en}`).join('\n')
+          + (es ? '\nResponda 1, 2 o 3.' : '\nReply 1, 2 or 3.');
+        return out;
+      }
       out.intent = 'no_slot_works';
       return amber('no_slot_works', true, 'None of the offered times work for the patient.', null);
     }
@@ -162,9 +176,22 @@ export const DEFAULT_BEDROCK_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-
 
 type ConverseMessage = { role: 'user' | 'assistant'; content: { text: string }[] };
 
-/** Strips anything that could look like our own context markers out of patient text. */
-function sanitizePatientText(s: string): string {
-  return s.replace(/<\/?\s*turn_context[^>]*>/gi, '').slice(0, 1600);
+/**
+ * Strips anything that could look like our own context markers out of patient text.
+ * - NFKC first, so look-alike characters (fullwidth ＜ ＞, etc.) become plain ASCII.
+ * - Repeats until nothing changes: a single pass can be beaten by nesting
+ *   ("<turn_<turn_context>context>" collapses into "<turn_context>").
+ * - Finally removes the bare marker word, so no fragment of it reaches the model.
+ */
+export function sanitizePatientText(s: string): string {
+  // Bounded input; every pass that changes something makes the text shorter, so the loop ends.
+  let text = s.slice(0, 4000).normalize('NFKC');
+  for (;;) {
+    const next = text.replace(/<\/?\s*turn_context[^>]*>/gi, '').replace(/turn_context/gi, '');
+    if (next === text) break;
+    text = next;
+  }
+  return text.slice(0, 1600);
 }
 
 export class BedrockSmsAgentModel implements SmsAgentModel {
@@ -196,18 +223,26 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
     for (const h of input.history) push(h.role, h.role === 'user' ? sanitizePatientText(h.text) : h.text);
     push('user', sanitizePatientText(input.patientMessage) || '(empty message)');
     messages[messages.length - 1].content.push({ text: `<turn_context>${JSON.stringify(input.context)}</turn_context>` });
+    if (input.correction) {
+      // Written by code, never by the patient: what was wrong with the previous attempt.
+      messages[messages.length - 1].content.push({
+        text: `Your previous sms_turn output was rejected: ${input.correction}. Call sms_turn again with a corrected output. Aim for 300 characters; reply_text must never exceed 459 characters.`,
+      });
+    }
 
     const system = [{ text: buildSystemPrompt(input) }, { text: TURN_CONTEXT_NOTE }];
 
-    // toolChoice is `auto`, NOT forced: current Claude models (Opus 5.5, Sonnet 5.5) reject a
-    // forced tool choice with a 400. The system prompt (TURN_CONTEXT_NOTE) requires exactly one
-    // sms_turn call; anything else is treated as invalid output by the engine (send nothing +
-    // amber agent_error). No temperature / top_p, no assistant prefill, no thinking settings:
-    // those are rejected by current models.
-    const res = await client.send(new ConverseCommand({
+    // Tool choice: models that accept a forced tool (e.g. Claude Haiku 4.5 / 5.5) are FORCED to
+    // call sms_turn. Models that reject forcing with a 400 (Opus 5.5, Sonnet 5.5, Fable) use `auto`,
+    // and the system prompt (TURN_CONTEXT_NOTE) requires exactly one sms_turn call. If a model
+    // still answers without the tool, we retry ONCE with a reminder; after that the engine fails
+    // safe (send nothing + amber agent_error). No temperature / top_p, no assistant prefill, no
+    // thinking settings: those are rejected by current models.
+    const forced = supportsForcedToolChoice(modelId);
+    const send = (msgs: ConverseMessage[]) => client.send(new ConverseCommand({
       modelId,
       system,
-      messages,
+      messages: msgs,
       // The command's input types are generated unions; our plain objects match them structurally.
       toolConfig: {
         tools: [{
@@ -217,21 +252,53 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
             inputSchema: { json: SMS_TURN_SCHEMA as unknown as Record<string, unknown> },
           },
         }],
-        toolChoice: { auto: {} },
+        toolChoice: forced ? { tool: { name: 'sms_turn' } } : { auto: {} },
       } as never,
       inferenceConfig: { maxTokens: 4000 },
     }), { abortSignal: AbortSignal.timeout(25_000) });
 
-    // Refusal or truncation → invalid output (the engine fails safe).
-    const stop = String(res.stopReason ?? '');
-    if (stop === 'max_tokens' || stop === 'refusal' || stop === 'guardrail_intervened' || stop === 'content_filtered') {
-      throw Object.assign(new Error(`model stopped: ${stop}`), { name: 'ModelStopped' });
+    let res = await send(messages);
+    let calls = smsTurnCalls(res);
+    if (calls.length === 0 && !isFailStop(res.stopReason)) {
+      // One retry with an explicit reminder (the patient's text is unchanged).
+      const retry = messages.map(m => ({ ...m, content: [...m.content] }));
+      retry[retry.length - 1].content.push({ text: RETRY_REMINDER });
+      res = await send(retry);
+      calls = smsTurnCalls(res);
     }
-    // Read blocks by type: only toolUse matters; text / reasoning (thinking) blocks are ignored.
-    const calls = (res.output?.message?.content ?? []).filter(b => b.toolUse?.name === 'sms_turn');
+
+    // Refusal or truncation → invalid output (the engine fails safe).
+    if (isFailStop(res.stopReason)) {
+      throw Object.assign(new Error(`model stopped: ${String(res.stopReason)}`), { name: 'ModelStopped' });
+    }
     if (calls.length !== 1) throw Object.assign(new Error(`expected one sms_turn call, got ${calls.length}`), { name: 'NoToolUse' });
     return calls[0].toolUse!.input;
   }
+}
+
+const RETRY_REMINDER =
+  'Reminder: respond ONLY by calling the sms_turn tool exactly once with the full JSON for this turn. Do not answer in plain text.';
+
+type ConverseResult = { stopReason?: string; output?: { message?: { content?: { toolUse?: { name?: string; input?: unknown } }[] } } };
+
+/** Read blocks by type: only toolUse matters; text / reasoning (thinking) blocks are ignored. */
+function smsTurnCalls(res: ConverseResult) {
+  return (res.output?.message?.content ?? []).filter(b => b.toolUse?.name === 'sms_turn');
+}
+
+function isFailStop(stop: unknown): boolean {
+  const s = String(stop ?? '');
+  return s === 'max_tokens' || s === 'refusal' || s === 'guardrail_intervened' || s === 'content_filtered';
+}
+
+/**
+ * Whether the Bedrock model accepts a forced tool choice. Opus 5.5, Sonnet 5.5 and Fable models
+ * return 400 for a forced tool; Haiku models (4.5, 5.5) accept it. Unknown models default to `auto`.
+ */
+export function supportsForcedToolChoice(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  if (/(opus|sonnet)-5-5|fable|mythos/.test(id)) return false;
+  return /haiku/.test(id);
 }
 
 // ── Selection ───────────────────────────────────────────────────────────────
@@ -244,6 +311,10 @@ const g = globalThis as unknown as { __relaySmsModel?: SmsAgentModel };
 
 export function getSmsAgentModel(): SmsAgentModel {
   const want = aiProviderName();
+  // Fail closed: the rule-based mock is a keyword demo, not a safety layer, and must never answer real patients.
+  if (want === 'mock' && process.env.NODE_ENV === 'production') {
+    throw Object.assign(new Error('AI_PROVIDER is unset or "mock", which is refused in production. Set AI_PROVIDER=bedrock.'), { name: 'AiProviderMisconfigured' });
+  }
   if (!g.__relaySmsModel || g.__relaySmsModel.name !== want) {
     g.__relaySmsModel = want === 'bedrock' ? new BedrockSmsAgentModel() : new MockSmsAgentModel();
   }

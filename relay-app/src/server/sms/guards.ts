@@ -10,6 +10,11 @@
 import 'server-only';
 import { measureSms } from './segments';
 import type { Lang } from './templates';
+
+/** The AI aims for 300 characters (2 SMS segments) but may go a little over: up to 3 segments is sent. */
+export const MAX_SEGMENTS = 3;
+/** 3 GSM-7 segments = 3 × 153 characters. */
+export const MAX_REPLY_CHARS = 459;
 import {
   AMBER_CODES, CALL_OUTCOMES, INTENTS, MODEL_TEMPLATES, RED_CODES,
   type OfferedSlot, type RedCode, type SmsTurnOutput,
@@ -145,7 +150,7 @@ export function validateModelOutput(raw: unknown): { ok: true; output: SmsTurnOu
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, errors: ['not an object'] };
 
   if (!isStrOrNull(o.reply_text)) e.push('reply_text');
-  else if (typeof o.reply_text === 'string' && o.reply_text.length > 300) e.push('reply_text too long');
+  else if (typeof o.reply_text === 'string' && o.reply_text.length > MAX_REPLY_CHARS) e.push('reply_text too long');
   if (!(o.use_template === null || oneOf(MODEL_TEMPLATES, o.use_template))) e.push('use_template');
   if (!oneOf(['en', 'es'] as const, o.language)) e.push('language');
   if (!(o.language_switch_request === null || oneOf(['en', 'es'] as const, o.language_switch_request))) e.push('language_switch_request');
@@ -231,7 +236,7 @@ export function validateOutgoing(text: string, ctx: OutgoingContext): string[] {
   const problems: string[] = [];
   if (!text.trim()) problems.push('empty');
   const seg = measureSms(text);
-  if (seg.segments > 2) problems.push(`too long (${seg.segments} segments)`);
+  if (seg.segments > MAX_SEGMENTS) problems.push(`too long (${seg.segments} segments)`);
   if (/\p{Extended_Pictographic}/u.test(text)) problems.push('emoji');
   if (/(https?:\/\/|www\.|\b[a-z0-9-]+\.(com|org|net|gov|edu|io|ly|co|us|info|health|app|me|link)\b)/i.test(text)) problems.push('link');
 

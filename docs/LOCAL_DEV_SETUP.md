@@ -78,8 +78,8 @@ real site always needs an Amazon Cognito login.
 
 ### Try the texting demo (fake patients only)
 
-1. Sign in as **Alex Rivera** (admin). Go to **Settings → Texting (SMS)** and click
-   **Run outreach now**. Fake patients due for outreach get their first text
+1. Sign in as **Alex Rivera** (admin). On the **Dashboard**, click the big green
+   **Run outreach now** button (top right). Fake patients due for outreach get their first text
    (only between 8 am and 8 pm, Monday–Saturday, clinic time).
 2. Open a referral (for example Grace Mwangi). The **Text messages** card shows the
    thread. In the **Patient simulator (prototype)** box, click the patient's date of

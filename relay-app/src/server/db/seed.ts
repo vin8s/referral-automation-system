@@ -71,13 +71,15 @@ async function insertAll(tx: Queryable): Promise<void> {
 
     await tx.query(
       `insert into referrals (id, patient_id, reason, referring_provider, referral_source, referral_time,
-         location, priority, state, escalation_reason, escalation_severity, escalation_raised_at, escalation_owner)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+         location, priority, state, escalation_reason, escalation_severity, escalation_raised_at, escalation_owner,
+         specialty)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         r.id, patientId, r.reason, r.referringProvider, r.referralSource, referralTime,
         r.location, r.priority, r.state,
         r.escalation?.reason ?? null, r.escalation?.severity ?? null,
         r.escalation ? mockTimeToIso(r.escalation.raisedAt) : null, r.escalation?.owner ?? null,
+        r.specialty ?? 'Primary care',
       ],
     );
 

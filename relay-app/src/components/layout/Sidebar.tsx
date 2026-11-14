@@ -70,7 +70,7 @@ export function Sidebar() {
         <div className="sb-mark">R</div>
         <div>
           <div className="sb-name">Relay</div>
-          <div className="sb-sub">Rhode Island Free Clinic · Providence</div>
+          <div className="sb-sub">Rhode Island Free Clinic<br />Providence, RI</div>
         </div>
       </div>
 

@@ -32,7 +32,7 @@ describe('outreach + happy path (case 1)', () => {
     const tick = await runOutreachTick(h.deps);
     expect(tick.sent).toBe(1);
     expect(await templates()).toEqual(['first_outreach']);
-    expect(h.provider.sent[0].body).toContain('(AI)');
+    expect(h.provider.sent[0].body).toContain('this is the scheduling team at');
     expect(await referralState(db, ref)).toBe('In Progress');
 
     await verify(h);
@@ -81,6 +81,73 @@ describe('outreach + happy path (case 1)', () => {
     await afterSlotRejected(h.deps, ref, rows[0]);
     expect((await templates()).at(-1)).toBe('slot_offer');
     expect(h.provider.sent.at(-1)!.body).not.toContain(picked);
+  });
+});
+
+describe('referral specialty (named only after DOB verification)', () => {
+  it('is absent from the first text, named in the time offer, and never sent to the AI', async () => {
+    await db.query(`update referrals set specialty = 'Primary care' where id = $1`, [ref]);
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    expect(h.provider.sent[0].body).not.toMatch(/primary care/i);
+    await verify(h);
+    expect(h.provider.sent[1].body).toContain('Which time works for your primary care appointment?');
+    for (const c of h.model.calls) expect(JSON.stringify(c)).not.toMatch(/primary care/i);
+  });
+
+  it('time offer reads normally when no specialty is set', async () => {
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    await verify(h);
+    expect(h.provider.sent[1].body).toContain('Which time works? Reply 1, 2 or 3');
+  });
+
+  it('Spanish time offer names the specialty in Spanish', async () => {
+    await db.query(`update referrals set specialty = 'Primary care' where id = $1`, [ref]);
+    await db.query(`update patients set language = 'Spanish' where id = (select patient_id from referrals where id = $1)`, [ref]);
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    await verify(h);
+    expect(h.provider.sent[1].body).toContain('para su cita de medicina general');
+  });
+});
+
+describe('none of the offered times work', () => {
+  it('the AI sees more open times, suggests them, and can capture one without a staff handoff', async () => {
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    await verify(h);
+    let alt: { slot_id: string; label_en: string } | undefined;
+    h.model.script = input => {
+      const more = input.context.more_open_slots ?? [];
+      const offeredIds = new Set(input.context.offered_slots.map(s => s.slot_id));
+      expect(more.length).toBeGreaterThan(10);
+      expect(more.some(s => offeredIds.has(s.slot_id))).toBe(false);
+      alt = more.find(s => s.label_en.startsWith('Thu'))!;
+      return turn({ intent: 'availability_preference', reply_text: `We don't have evening times. How about 1) ${alt.label_en}?` });
+    };
+    await say(h, "None work, I'm available Thursdays at 6:00");
+    expect(h.provider.sent.at(-1)!.body).toContain(alt!.label_en);
+    expect(await openAmber(db, ref)).toEqual([]);
+
+    h.model.script = () => turn({
+      intent: 'slot_selected', use_template: 'slot_captured', call_outcome: 'Appointment Accepted',
+      captured_slot: { slot_id: alt!.slot_id, patient_text: '1' },
+    });
+    await say(h, '1');
+    expect((await templates()).at(-1)).toBe('slot_captured');
+    expect(h.provider.sent.at(-1)!.body).toContain(alt!.label_en);
+    expect(await referralState(db, ref)).toBe('Pending Confirmation');
+  });
+
+  it('the mock AI suggests other times instead of handing off', async () => {
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    await verify(h);
+    h.model.script = (input) => new MockSmsAgentModel().turn(input);
+    await say(h, 'none work, thursday is best');
+    expect(h.provider.sent.at(-1)!.body).toMatch(/We also have:\n1\) Thu/);
+    expect(await openAmber(db, ref)).toEqual([]);
   });
 });
 
@@ -281,6 +348,28 @@ describe('fail-safes', () => {
     const h = harness(db, () => ({ reply_text: 'hi there' }));
     await runOutreachTick(h.deps);
     await say(h, 'hello?');
+    expect(await templates()).toEqual(['first_outreach']);
+    expect(await openAmber(db, ref)).toContain('agent_error');
+  });
+
+  it('an invalid first answer gets one correction attempt that names the problem', async () => {
+    const long = 'x'.repeat(500);
+    const h = harness(db, input => input.correction
+      ? turn({ reply_text: 'Sorry, could you send that again?', intent: 'other' })
+      : turn({ reply_text: long, intent: 'other' }));
+    await runOutreachTick(h.deps);
+    await say(h, 'hello?');
+    const model = h.deps.model as unknown as { calls: { correction?: string }[] };
+    expect(model.calls).toHaveLength(2);
+    expect(model.calls[1].correction).toContain('reply_text too long');
+    expect(await openAmber(db, ref)).not.toContain('agent_error');
+  });
+
+  it('still fails safe when the correction attempt is also invalid', async () => {
+    const h = harness(db, () => turn({ reply_text: 'y'.repeat(500) }));
+    await runOutreachTick(h.deps);
+    await say(h, 'hello?');
+    expect((h.deps.model as unknown as { calls: unknown[] }).calls).toHaveLength(2);
     expect(await templates()).toEqual(['first_outreach']);
     expect(await openAmber(db, ref)).toContain('agent_error');
   });
