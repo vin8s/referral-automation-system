@@ -322,7 +322,7 @@
   .sb-brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 14px; border-bottom: 1px solid var(--relay-hairline); margin-bottom: 10px; }
   .sb-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--relay-accent); color: white; font-weight: 700; font-size: 14px; display: grid; place-items: center; letter-spacing: -0.02em; flex-shrink: 0; }
   .sb-name { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; color: var(--relay-ink); }
-  .sb-sub { color: var(--relay-ink-3); font-size: 11px; margin-top: 1px; }
+  .sb-sub { color: var(--relay-ink-3); font-size: 11px; line-height: 1.35; margin-top: 1px; }
   .sb-section { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--relay-ink-4); padding: 12px 10px 6px; font-weight: 600; }
   .sb-spacer { flex: 1; }
 

@@ -568,7 +568,7 @@ export async function ingestReferrals(
         `insert into referrals (id, patient_id, reason, referring_provider, referral_source, location, priority, state)
          values ($1, $2, $3, $4, $5, $6, $7, 'Queued')`,
         [referralId, pt[0].id, row.reason ?? '', row.referringProvider ?? '',
-          via === 'manual' ? 'Manual entry' : 'Uploaded batch', row.location || 'Mission Bay',
+          via === 'manual' ? 'Manual entry' : 'Uploaded batch', row.location || 'Providence',
           row.priority === 'urgent' ? 'urgent' : 'normal']);
       await audit(tx, actor, referralId, 'referral.ingest',
         `${via === 'manual' ? 'Entered manually' : 'Ingested via spreadsheet upload'} · ` +
