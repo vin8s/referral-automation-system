@@ -160,8 +160,8 @@ export async function simulatePatientText(referralId: string, body: string, user
   return handleInbound(d, { from: ref.phone, body: text, referralId, provider: 'mock' });
 }
 
-export async function receiveInboundSms(input: { from: string; body: string; providerMessageId?: string | null }) {
-  return handleInbound(await smsDeps(), { ...input, provider: 'aws' });
+export async function receiveInboundSms(input: { from: string; body: string; providerMessageId?: string | null; provider?: 'aws' | 'twilio' }) {
+  return handleInbound(await smsDeps(), { ...input, provider: input.provider ?? 'aws' });
 }
 
 export async function listNeedsHuman(): Promise<NeedsHumanItem[]> {

@@ -381,7 +381,7 @@ export interface SmsThread {
   textingPaused: boolean;
   /** SMS_PROVIDER=mock: the "Patient simulator (prototype)" box is available. */
   simulatorEnabled: boolean;
-  provider: 'mock' | 'aws';
+  provider: 'mock' | 'aws' | 'twilio';
   aiProvider: 'mock' | 'bedrock';
 }
 
@@ -400,7 +400,7 @@ export interface OutreachSettings {
 
 export interface OutreachSettingsView {
   settings: OutreachSettings;
-  provider: 'mock' | 'aws';
+  provider: 'mock' | 'aws' | 'twilio';
   aiProvider: 'mock' | 'bedrock';
   timezone: string;
   /** Development only: show the "Run outreach now" button. */

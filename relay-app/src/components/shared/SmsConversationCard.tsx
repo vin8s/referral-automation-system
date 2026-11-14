@@ -105,6 +105,7 @@ export function SmsConversationCard({
           <p className="card-sub" style={{ marginTop: 3 }}>
             AI texting assistant · nothing is booked until an MA confirms
             {thread.provider === 'mock' && ' · prototype: texts are recorded, not sent'}
+            {thread.provider === 'twilio' && ' · Twilio test mode: only approved test phones receive texts'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>

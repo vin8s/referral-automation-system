@@ -9,7 +9,7 @@ import { SESSION_COOKIE, verifySession } from '@/server/auth/session';
 // Public paths authenticate themselves:
 //   /api/sms/inbound        — SNS signature + topic check (AWS End User Messaging inbound SMS)
 //   /api/sms/outreach/tick  — bearer OUTREACH_CRON_TOKEN (EventBridge Scheduler) or an admin session
-const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/sms/inbound', '/api/sms/outreach/tick'];
+const PUBLIC_PATHS = ['/login', '/api/auth/', '/api/sms/inbound', '/api/sms/outreach/tick', '/api/sms/twilio/inbound'];
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
