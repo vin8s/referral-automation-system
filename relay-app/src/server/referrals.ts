@@ -49,10 +49,17 @@ function isoToMdy(iso: string | null): string {
   return `${m}/${d}/${y}`;
 }
 
-/** "MM/DD/YYYY" → "YYYY-MM-DD" (null if not parseable). */
-function mdyToIso(mdy: string | undefined): string | null {
+/**
+ * "MM/DD/YYYY" → "YYYY-MM-DD", or null unless it is a real calendar date
+ * (so "13/45/1980" can't crash the ::date cast and fail a whole import).
+ */
+export function mdyToIso(mdy: string | undefined): string | null {
   const m = mdy?.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
+  if (!m) return null;
+  const [mo, d, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (y < 1900 || dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
 }
 
 /** Referrals in 'In Progress' with at least one attempt display as 'Attempted' (REFERRAL_STATUSES.md). */
@@ -537,7 +544,7 @@ export async function updateReferral(
     if (draft.phone)             lines.push(`Phone → ${draft.phone}`);
     if (draft.language)          lines.push(`Language → ${draft.language}`);
     if (draft.insurance)         lines.push(`Insurance → ${draft.insurance}`);
-    if (draft.dateOfBirth)       lines.push(`DOB → ${draft.dateOfBirth}`);
+    if (mdyToIso(draft.dateOfBirth)) lines.push(`DOB → ${draft.dateOfBirth}`);
     if (draft.reason)            lines.push(`Reason → ${draft.reason}`);
     if (draft.referringProvider) lines.push(`Provider → ${draft.referringProvider}`);
     if (priority)                lines.push(`Priority → ${priority}`);

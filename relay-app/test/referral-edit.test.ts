@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from '@/server/db/driver';
 import { addReferral, testDb } from './sms-harness';
-import { sanitizeDraft, sanitizeIngestRow, updateReferral } from '@/server/referrals';
+import { mdyToIso, sanitizeDraft, sanitizeIngestRow, updateReferral } from '@/server/referrals';
 import type { SessionUser } from '@/lib/auth-types';
 
 const ma: SessionUser = { id: 'u-ma', name: 'Test MA', role: 'ma' };
@@ -49,6 +49,23 @@ describe('updateReferral: identity check does not survive a phone / DOB change',
     await verifiedConv(id);
     await updateReferral(id, { phone: '415-555-0199', patientName: 'Grace T. Testpatient' }, undefined, ma);
     expect((await identity(id)).identity_verified).toBe(true);
+  });
+});
+
+describe('mdyToIso', () => {
+  it('accepts real MM/DD/YYYY dates only', () => {
+    expect(mdyToIso('3/4/1980')).toBe('1980-03-04');
+    expect(mdyToIso('02/29/2024')).toBe('2024-02-29');
+    expect(mdyToIso('13/45/1980')).toBeNull();
+    expect(mdyToIso('02/30/1980')).toBeNull();
+    expect(mdyToIso('1980-03-04')).toBeNull();
+  });
+
+  it('an impossible DOB in a manual edit is ignored instead of crashing the request', async () => {
+    db = await testDb();
+    (globalThis as unknown as { __relayDb?: Promise<Db> }).__relayDb = Promise.resolve(db);
+    const id = await addReferral(db, { dob: '1980-03-04' });
+    expect((await updateReferral(id, { dateOfBirth: '13/45/1980' }, undefined, ma)).success).toBe(true);
   });
 });
 
