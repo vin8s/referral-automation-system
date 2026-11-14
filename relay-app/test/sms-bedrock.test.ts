@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sent: Record<string, unknown>[] = [];
 let response: Record<string, unknown> = {};
+const queue: Record<string, unknown>[] = [];
 
 vi.mock('@aws-sdk/client-bedrock-runtime', () => ({
   ConverseCommand: class { constructor(public input: Record<string, unknown>) {} },
   BedrockRuntimeClient: class {
-    async send(cmd: { input: Record<string, unknown> }) { sent.push(cmd.input); return response; }
+    async send(cmd: { input: Record<string, unknown> }) { sent.push(cmd.input); return queue.length ? queue.shift() : response; }
   },
 }));
 
@@ -28,15 +29,15 @@ const input = {
 const toolUse = (inp: unknown) => ({ toolUse: { toolUseId: 't1', name: 'sms_turn', input: inp } });
 
 describe('BedrockSmsAgentModel', () => {
-  beforeEach(() => { sent.length = 0; delete process.env.BEDROCK_MODEL_ID; });
+  beforeEach(() => { sent.length = 0; queue.length = 0; delete process.env.BEDROCK_MODEL_ID; });
 
-  it('uses toolChoice auto, no sampling params, default Haiku model, alternating turns', async () => {
+  it('forces the sms_turn tool for Haiku, no sampling params, default Haiku model, alternating turns', async () => {
     response = { stopReason: 'tool_use', output: { message: { content: [{ reasoningContent: {} }, { text: 'ok' }, toolUse({ a: 1 })] } } };
     const out = await new BedrockSmsAgentModel().turn(input);
     expect(out).toEqual({ a: 1 });
     const req = sent[0] as { modelId: string; toolConfig: { toolChoice: unknown }; inferenceConfig: Record<string, unknown>; messages: { role: string; content: { text: string }[] }[] };
     expect(req.modelId).toBe(DEFAULT_BEDROCK_MODEL_ID);
-    expect(req.toolConfig.toolChoice).toEqual({ auto: {} });
+    expect(req.toolConfig.toolChoice).toEqual({ tool: { name: 'sms_turn' } });
     expect(req.inferenceConfig).not.toHaveProperty('temperature');
     expect(req.inferenceConfig).not.toHaveProperty('topP');
     expect(req.messages.map(m => m.role)).toEqual(['user', 'assistant', 'user']);
@@ -51,6 +52,23 @@ describe('BedrockSmsAgentModel', () => {
     response = { stopReason: 'tool_use', output: { message: { content: [toolUse({})] } } };
     await new BedrockSmsAgentModel().turn(input);
     expect((sent[0] as { modelId: string }).modelId).toBe('anthropic.claude-sonnet-5-5');
+    // Sonnet / Opus 5.5 reject a forced tool, so they get `auto`.
+    expect((sent[0] as { toolConfig: { toolChoice: unknown } }).toolConfig.toolChoice).toEqual({ auto: {} });
+  });
+
+  it('retries once with a reminder when the model answers without the tool', async () => {
+    queue.push(
+      { stopReason: 'end_turn', output: { message: { content: [{ text: 'None work? Sure!' }] } } },
+      { stopReason: 'tool_use', output: { message: { content: [toolUse({ ok: true })] } } },
+    );
+    const out = await new BedrockSmsAgentModel().turn(input);
+    expect(out).toEqual({ ok: true });
+    expect(sent).toHaveLength(2);
+    const retryMsgs = (sent[1] as { messages: { content: { text: string }[] }[] }).messages;
+    expect(retryMsgs.at(-1)!.content.at(-1)!.text).toContain('sms_turn');
+    // The first request was not mutated by the retry.
+    const firstMsgs = (sent[0] as { messages: { content: { text: string }[] }[] }).messages;
+    expect(firstMsgs.at(-1)!.content.at(-1)!.text.startsWith('<turn_context>')).toBe(true);
   });
 
   it.each([

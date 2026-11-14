@@ -199,15 +199,17 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
 
     const system = [{ text: buildSystemPrompt(input) }, { text: TURN_CONTEXT_NOTE }];
 
-    // toolChoice is `auto`, NOT forced: current Claude models (Opus 5.5, Sonnet 5.5) reject a
-    // forced tool choice with a 400. The system prompt (TURN_CONTEXT_NOTE) requires exactly one
-    // sms_turn call; anything else is treated as invalid output by the engine (send nothing +
-    // amber agent_error). No temperature / top_p, no assistant prefill, no thinking settings:
-    // those are rejected by current models.
-    const res = await client.send(new ConverseCommand({
+    // Tool choice: models that accept a forced tool (e.g. Claude Haiku 4.5 / 5.5) are FORCED to
+    // call sms_turn. Models that reject forcing with a 400 (Opus 5.5, Sonnet 5.5, Fable) use `auto`,
+    // and the system prompt (TURN_CONTEXT_NOTE) requires exactly one sms_turn call. If a model
+    // still answers without the tool, we retry ONCE with a reminder; after that the engine fails
+    // safe (send nothing + amber agent_error). No temperature / top_p, no assistant prefill, no
+    // thinking settings: those are rejected by current models.
+    const forced = supportsForcedToolChoice(modelId);
+    const send = (msgs: ConverseMessage[]) => client.send(new ConverseCommand({
       modelId,
       system,
-      messages,
+      messages: msgs,
       // The command's input types are generated unions; our plain objects match them structurally.
       toolConfig: {
         tools: [{
@@ -217,21 +219,53 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
             inputSchema: { json: SMS_TURN_SCHEMA as unknown as Record<string, unknown> },
           },
         }],
-        toolChoice: { auto: {} },
+        toolChoice: forced ? { tool: { name: 'sms_turn' } } : { auto: {} },
       } as never,
       inferenceConfig: { maxTokens: 4000 },
     }), { abortSignal: AbortSignal.timeout(25_000) });
 
-    // Refusal or truncation → invalid output (the engine fails safe).
-    const stop = String(res.stopReason ?? '');
-    if (stop === 'max_tokens' || stop === 'refusal' || stop === 'guardrail_intervened' || stop === 'content_filtered') {
-      throw Object.assign(new Error(`model stopped: ${stop}`), { name: 'ModelStopped' });
+    let res = await send(messages);
+    let calls = smsTurnCalls(res);
+    if (calls.length === 0 && !isFailStop(res.stopReason)) {
+      // One retry with an explicit reminder (the patient's text is unchanged).
+      const retry = messages.map(m => ({ ...m, content: [...m.content] }));
+      retry[retry.length - 1].content.push({ text: RETRY_REMINDER });
+      res = await send(retry);
+      calls = smsTurnCalls(res);
     }
-    // Read blocks by type: only toolUse matters; text / reasoning (thinking) blocks are ignored.
-    const calls = (res.output?.message?.content ?? []).filter(b => b.toolUse?.name === 'sms_turn');
+
+    // Refusal or truncation → invalid output (the engine fails safe).
+    if (isFailStop(res.stopReason)) {
+      throw Object.assign(new Error(`model stopped: ${String(res.stopReason)}`), { name: 'ModelStopped' });
+    }
     if (calls.length !== 1) throw Object.assign(new Error(`expected one sms_turn call, got ${calls.length}`), { name: 'NoToolUse' });
     return calls[0].toolUse!.input;
   }
+}
+
+const RETRY_REMINDER =
+  'Reminder: respond ONLY by calling the sms_turn tool exactly once with the full JSON for this turn. Do not answer in plain text.';
+
+type ConverseResult = { stopReason?: string; output?: { message?: { content?: { toolUse?: { name?: string; input?: unknown } }[] } } };
+
+/** Read blocks by type: only toolUse matters; text / reasoning (thinking) blocks are ignored. */
+function smsTurnCalls(res: ConverseResult) {
+  return (res.output?.message?.content ?? []).filter(b => b.toolUse?.name === 'sms_turn');
+}
+
+function isFailStop(stop: unknown): boolean {
+  const s = String(stop ?? '');
+  return s === 'max_tokens' || s === 'refusal' || s === 'guardrail_intervened' || s === 'content_filtered';
+}
+
+/**
+ * Whether the Bedrock model accepts a forced tool choice. Opus 5.5, Sonnet 5.5 and Fable models
+ * return 400 for a forced tool; Haiku models (4.5, 5.5) accept it. Unknown models default to `auto`.
+ */
+export function supportsForcedToolChoice(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  if (/(opus|sonnet)-5-5|fable|mythos/.test(id)) return false;
+  return /haiku/.test(id);
 }
 
 // ── Selection ───────────────────────────────────────────────────────────────
