@@ -91,6 +91,24 @@ export function TextingSettings() {
       </div>
 
       <div className="card">
+        <div className="card-head"><h3>New referrals</h3></div>
+        <Row
+          label="Staff approval before the first text (pilot mode)"
+          sub={s.approvalRequired
+            ? 'On: new referrals wait in Ready to text on the Dashboard until a staff member approves them. Follow-ups after the first text are automatic.'
+            : 'Off: referrals with SMS consent get their first text automatically in the next sending window.'}
+        >
+          <button
+            className="btn btn-sm" disabled={disabled}
+            style={s.approvalRequired ? { background: 'var(--relay-accent-50)', borderColor: 'var(--relay-accent)', color: 'var(--relay-accent-700)' } : undefined}
+            onClick={() => save({ ...s, approvalRequired: !s.approvalRequired }, s.approvalRequired ? 'Pilot mode off: first texts are automatic.' : 'Pilot mode on: staff approve each first text.')}
+          >
+            {s.approvalRequired ? 'On' : 'Off'}
+          </button>
+        </Row>
+      </div>
+
+      <div className="card">
         <div className="card-head">
           <h3>Quiet hours</h3>
           <span style={{ fontSize: 12, color: 'var(--relay-ink-3)' }}>Clinic time · {view.timezone}</span>

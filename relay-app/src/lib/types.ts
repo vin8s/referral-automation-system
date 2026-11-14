@@ -292,6 +292,8 @@ export interface SmsThread {
 
 export interface OutreachSettings {
   textingPaused: boolean;
+  /** Pilot mode: staff approve each referral (dashboard "Ready to text") before its first text. */
+  approvalRequired: boolean;
   quietStart: string;
   quietEnd: string;
   allowedDays: number[];
@@ -312,6 +314,24 @@ export interface OutreachSettingsView {
   devTools: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
+}
+
+/** A referral waiting for staff approval before its first text (pilot mode). */
+export interface ReadyToTextItem {
+  referralId: string;
+  patient: string;
+  phone: string;
+  language: string;
+  specialty: string;
+  priority: Priority;
+  receivedAt: string;
+  /** null = can be texted once approved; otherwise why it can't be texted yet. */
+  blocked: string | null;
+}
+
+export interface ReadyToTextView {
+  approvalRequired: boolean;
+  items: ReadyToTextItem[];
 }
 
 export interface OutreachTickResult {

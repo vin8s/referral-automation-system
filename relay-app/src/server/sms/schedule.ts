@@ -4,6 +4,8 @@ import 'server-only';
 
 export interface OutreachSettings {
   textingPaused: boolean;
+  /** Pilot mode: staff approve each referral before its first text. */
+  approvalRequired: boolean;
   quietStart: string;          // 'HH:MM' local — sending allowed from here…
   quietEnd: string;            // …until here
   allowedDays: number[];       // 0 = Sunday … 6 = Saturday
@@ -17,6 +19,7 @@ export interface OutreachSettings {
 
 export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
   textingPaused: false,
+  approvalRequired: true,
   quietStart: '08:00',
   quietEnd: '20:00',
   allowedDays: [1, 2, 3, 4, 5, 6],

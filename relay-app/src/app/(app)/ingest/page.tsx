@@ -5,12 +5,12 @@
 // SMS consent is recorded explicitly per patient and never assumed: without it
 // the texting assistant will not contact the patient.
 
-import { useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { read as xlsxRead, utils as xlsxUtils, writeFileXLSX } from 'xlsx';
 import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
-import { ingestReferrals } from '@/lib/data';
+import { getOutreachSettings, ingestReferrals } from '@/lib/data';
 import type { IngestReferralInput } from '@/lib/data';
 import { SPECIALTY_HELP, SPECIALTY_MAX_LEN, SPECIALTY_SUGGESTIONS } from '@/lib/specialties';
 
@@ -182,6 +182,11 @@ export default function IngestPage() {
   const [skippedCount, setSkippedCount] = useState(0);
   const [consentedCount, setConsentedCount] = useState(0);
   const [mode, setMode] = useState<'upload' | 'manual'>('upload');
+  // Pilot mode: new referrals wait on the dashboard ("Ready to text") for staff approval.
+  const [pilotMode, setPilotMode] = useState(true);
+  useEffect(() => {
+    getOutreachSettings().then(v => setPilotMode(v.settings.approvalRequired)).catch(() => undefined);
+  }, []);
 
   const flagCount = rows?.filter(r => r.flags.length > 0).length ?? 0;
   const okRows = rows?.filter(r => r.flags.length === 0) ?? [];
@@ -280,12 +285,16 @@ export default function IngestPage() {
           </div>
           <div style={{ fontSize: 13, color: 'var(--relay-ink-3)', marginTop: 6 }}>
             {skippedCount > 0 && `${skippedCount} flagged row${skippedCount !== 1 ? 's' : ''} skipped · `}
-            All are Queued. {consentedCount} with SMS consent will get outreach texts in the next outreach window
+            {pilotMode
+              ? `All are Queued. ${consentedCount} with SMS consent are waiting for approval in Ready to text on the Dashboard; no texts go out until you approve them`
+              : `All are Queued. ${consentedCount} with SMS consent get their first text in the next sending window`}
             {importedCount - consentedCount > 0 && `; ${importedCount - consentedCount} without consent wait until staff record it on the referral`}.
           </div>
           <div style={{ marginTop: 20, display: 'flex', gap: 8, justifyContent: 'center' }}>
             <button className="btn" onClick={handleReset}>Upload another file</button>
-            <Link className="btn btn-primary" href="/referrals">View referrals</Link>
+            {pilotMode
+              ? <Link className="btn btn-primary" href="/dashboard">Review and approve texts</Link>
+              : <Link className="btn btn-primary" href="/referrals">View referrals</Link>}
           </div>
         </div>
       </>

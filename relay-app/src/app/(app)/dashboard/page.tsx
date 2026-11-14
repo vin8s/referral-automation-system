@@ -10,6 +10,7 @@ import { Icon } from '@/components/shared/Icon';
 import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList';
 import { useSession } from '@/contexts/SessionContext';
 import { ScheduleFreshnessBanner } from '@/components/shared/ScheduleFreshnessBanner';
+import { ReadyToTextCard } from '@/components/screens/dashboard/ReadyToTextCard';
 import type { ConfirmQueue, Referral } from '@/lib/types';
 
 // ── Referral quick-view modal ─────────────────────────────────────────────────
@@ -165,6 +166,9 @@ export default function DashboardPage() {
       <ScheduleFreshnessBanner />
 
       <div className="stack">
+        {/* Pilot mode: approve new referrals before their first text */}
+        <ReadyToTextCard onApproved={fetchAll} />
+
         {/* Slots to confirm */}
         <div className="card">
           <div className="card-head">

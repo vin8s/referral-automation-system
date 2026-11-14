@@ -13,7 +13,7 @@ import type {
   OutreachLogEntry, CalendarEvent, PipelineCount,
   Org, CurrentUser,
   Priority, ReferralLogEntry, RawSettings,
-  SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView,
+  SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, ReadyToTextView,
   EcwImportOverview, EcwImportStatus, EcwImportDraft, EcwApplyResult, EcwImportDetail,
 } from './types';
 import type { EcwImportOptions, EcwMapping } from './ecwImport';
@@ -318,4 +318,18 @@ export async function resolveScheduleReviewItem(
   itemId: string, decision: { action: 'match'; referralId: string } | { action: 'ignore' },
 ): Promise<{ success: boolean; outcome?: string; errorMsg?: string }> {
   return mutate(`/schedule-import/review/${encodeURIComponent(itemId)}`, 'POST', decision);
+}
+
+// ── Pilot mode: "Ready to text" ─────────────────────────────────────────────
+
+/** Referrals waiting for staff approval before their first text (empty when pilot mode is off). */
+export async function getReadyToText(): Promise<ReadyToTextView> {
+  return api<ReadyToTextView>('/sms/ready-to-text');
+}
+
+/** Approve referrals for their first text; Relay then sends it in the next sending window. */
+export async function approveForTexting(
+  referralIds: string[],
+): Promise<{ approved: string[]; notApproved: { referralId: string; reason: string }[] }> {
+  return api('/sms/ready-to-text', { method: 'POST', body: { referralIds } });
 }

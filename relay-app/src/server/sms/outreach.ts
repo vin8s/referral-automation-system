@@ -1,9 +1,12 @@
 // Outreach scheduler: sends due unsolicited texts (first_outreach → follow_up_1 →
 // follow_up_2 → final_attempt) and releases texts held for quiet hours.
 //
-// Called by POST /api/sms/outreach/tick — from an admin's "Run outreach now" button
-// in development, and from AWS EventBridge Scheduler (bearer OUTREACH_CRON_TOKEN) in
-// production, e.g. every 15 minutes.
+// Runs automatically (src/server/sms/autorun.ts: after each referral import, after staff
+// approve referrals, and on a timer) and from AWS EventBridge Scheduler calling
+// POST /api/sms/outreach/tick in production.
+//
+// Pilot mode (settings.approvalRequired): a referral's first text waits until staff
+// approve it on the dashboard ("Ready to text").
 //
 // Rules (AGENT_SAFETY_RULES R6, R7): pause switch, quiet hours, cadence 0/2/5/9,
 // 48h spacing, 1 per day, lifetime cap 6, consent + opt-out, never text minors,
@@ -85,6 +88,10 @@ export async function runOutreachTick(d: SmsDeps): Promise<TickResult> {
       skip('cadence exhausted'); continue;
     }
     if (verdict.action === 'wait') { skip(verdict.reason); continue; }
+    // Pilot mode: the FIRST text of a referral waits for staff approval ("Ready to text").
+    if (verdict.step === 0 && (conv?.outreachCount ?? 0) === 0 && settings.approvalRequired && !ref.outreachApprovedAt) {
+      skip('awaiting staff approval'); continue;
+    }
     if (!result.inWindow) { skip('quiet hours'); continue; }
 
     const c = await repo.getConv(q, ref.id);

@@ -5,7 +5,8 @@ import 'server-only';
 import { getDb } from '@/server/db';
 import { getOrg, getRawSettings } from '@/server/staticData';
 import type {
-  ConfirmQueueItem, NeedsHumanItem, OutreachSettings, OutreachSettingsView, SmsChannelPreference, SmsMessage, SmsThread,
+  ConfirmQueueItem, NeedsHumanItem, OutreachSettings, OutreachSettingsView, Priority, ReadyToTextItem, ReadyToTextView,
+  SmsChannelPreference, SmsMessage, SmsThread,
 } from '@/lib/types';
 import type { SessionUser } from '@/lib/auth-types';
 import {
@@ -16,7 +17,7 @@ import { runOutreachTick } from './outreach';
 import { getSmsProvider, smsProviderName } from './provider';
 import * as repo from './repo';
 import { staffActor } from './repo';
-import { clinicTimeZone, DEFAULT_OUTREACH_SETTINGS } from './schedule';
+import { ageOn, clinicTimeZone, DEFAULT_OUTREACH_SETTINGS } from './schedule';
 import { OUTREACH_STEPS } from './templates';
 
 export { SmsActionError };
@@ -205,6 +206,7 @@ export function sanitizeOutreachSettings(raw: unknown): OutreachSettings {
   if (quietEnd <= quietStart) { quietStart = d.quietStart; quietEnd = d.quietEnd; }
   return {
     textingPaused: typeof r.textingPaused === 'boolean' ? r.textingPaused : false,
+    approvalRequired: typeof r.approvalRequired === 'boolean' ? r.approvalRequired : d.approvalRequired,
     quietStart, quietEnd,
     allowedDays: days.filter(x => x !== 0).length ? days.filter(x => x !== 0) : d.allowedDays, // never Sundays (R7.1)
     holidays: Array.isArray(r.holidays) ? (r.holidays.filter(x => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x)) as string[]) : [],
@@ -221,6 +223,11 @@ export async function saveOutreachSettings(raw: unknown, user: SessionUser): Pro
   const before = await repo.loadOutreachSettings(db);
   const s = sanitizeOutreachSettings(raw);
   await repo.saveOutreachSettings(db, s, user.name);
+  if (before.approvalRequired !== s.approvalRequired) {
+    await repo.audit(db, staffActor(user), null, 'sms.approval_mode', s.approvalRequired
+      ? 'Pilot mode ON: staff approve each referral before its first text'
+      : 'Pilot mode OFF: first texts go out automatically');
+  }
   if (before.textingPaused !== s.textingPaused) {
     await repo.audit(db, staffActor(user), null, 'sms.kill_switch', s.textingPaused ? 'PAUSED all texting (kill switch)' : 'Resumed texting (kill switch off)');
   }
@@ -297,4 +304,67 @@ export async function withSmsExcerpts(items: ConfirmQueueItem[]): Promise<Confir
     const msgs = (await repo.listMessages(db, item.referralId, { limit: 6 })).filter(m => m.status !== 'suppressed');
     return { ...item, smsExcerpt: msgs.map(toMessage) };
   }));
+}
+
+// ── Pilot mode: "Ready to text" (staff approve each referral's first text) ──
+
+/** Why a referral can't be texted yet, using the same rules as the outreach scheduler. */
+function blockedReason(ref: repo.RefCtx, conv: repo.Conv | null, now: Date, tz: string): string | null {
+  if (ref.optedOut) return 'Opted out of texts';
+  if (!ref.consent) return 'No SMS consent recorded';
+  if (!ref.phone) return 'No mobile number';
+  if (conv?.numberSuppressed) return 'Reported wrong number';
+  if (conv && conv.channelPreference !== 'sms') return 'Texting turned off for this referral';
+  if (conv?.paused) return 'Texting paused for this referral';
+  if (ref.dobIso && ageOn(ref.dobIso, now, tz) < 18) return 'Under 18: call the family';
+  if (!repo.langFromPatient(ref.language)) return `Language (${ref.language}): call with an interpreter`;
+  return null;
+}
+
+export async function listReadyToText(): Promise<ReadyToTextView> {
+  const db = await getDb();
+  const settings = await repo.loadOutreachSettings(db);
+  if (!settings.approvalRequired) return { approvalRequired: false, items: [] };
+  const now = new Date();
+  const tz = clinicTimeZone();
+  const items: ReadyToTextItem[] = [];
+  for (const ref of await repo.listAwaitingApproval(db)) {
+    const conv = await repo.findConv(db, ref.id);
+    items.push({
+      referralId: ref.id, patient: ref.patientName, phone: ref.phone, language: ref.language,
+      specialty: ref.specialty, priority: ref.priority as Priority,
+      receivedAt: fmt(ref.referralTime) ?? '', blocked: blockedReason(ref, conv, now, tz),
+    });
+  }
+  return { approvalRequired: true, items };
+}
+
+/**
+ * Staff approve referrals for their first text. Only referrals that can be texted
+ * right now are approved; the rest are reported back. Outreach then runs by itself.
+ */
+export async function approveForTexting(
+  ids: unknown, user: SessionUser,
+): Promise<{ approved: string[]; notApproved: { referralId: string; reason: string }[] }> {
+  const wanted = Array.isArray(ids)
+    ? [...new Set(ids.filter((x): x is string => typeof x === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(x)))].slice(0, 500)
+    : [];
+  const db = await getDb();
+  const now = new Date();
+  const tz = clinicTimeZone();
+  const waiting = new Map((await repo.listAwaitingApproval(db)).map(r => [r.id, r]));
+  const ok: string[] = [];
+  const notApproved: { referralId: string; reason: string }[] = [];
+  for (const id of wanted) {
+    const ref = waiting.get(id);
+    if (!ref) { notApproved.push({ referralId: id, reason: 'Not waiting for approval' }); continue; }
+    const why = blockedReason(ref, await repo.findConv(db, id), now, tz);
+    if (why) notApproved.push({ referralId: id, reason: why });
+    else ok.push(id);
+  }
+  const approved = await repo.approveOutreach(db, ok, user.name, now);
+  for (const id of approved) {
+    await repo.audit(db, staffActor(user), id, 'sms.approved', 'Approved for texting (pilot mode); first text goes out in the next sending window');
+  }
+  return { approved, notApproved };
 }

@@ -78,10 +78,12 @@ real site always needs an Amazon Cognito login.
 
 ### Try the texting demo (fake patients only)
 
-1. Outreach runs by itself: right after referrals are imported, and every 5 minutes
-   (`OUTREACH_AUTORUN_SECONDS`) for follow-ups. Fake patients with SMS consent get their
-   first text automatically (only between 8 am and 8 pm, Monday–Saturday, clinic time).
-   Set `OUTREACH_AUTORUN=off` in `.env.local` to stop automatic texting.
+1. **Pilot mode is on by default:** new referrals wait in **Ready to text** at the top of
+   the **Dashboard**. Tick the patients (or **Approve all ready**). Relay sends the first
+   text in the next sending window (8 am–8 pm, Monday–Saturday, clinic time) and runs the
+   follow-ups by itself; outreach checks every 5 minutes (`OUTREACH_AUTORUN_SECONDS`).
+   Turn pilot mode off in **Settings → Texting → New referrals** to make first texts
+   automatic. `OUTREACH_AUTORUN=off` in `.env.local` stops automatic texting.
 2. Open a referral (for example Grace Mwangi). The **Text messages** card shows the
    thread. In the **Patient simulator (prototype)** box, click the patient's date of
    birth chip, then **2**. The slot appears in **Confirm queue** as "SMS".
