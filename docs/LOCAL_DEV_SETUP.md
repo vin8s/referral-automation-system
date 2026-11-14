@@ -78,9 +78,10 @@ real site always needs an Amazon Cognito login.
 
 ### Try the texting demo (fake patients only)
 
-1. Sign in as **Alex Rivera** (admin). On the **Dashboard**, click the big green
-   **Run outreach now** button (top right). Fake patients due for outreach get their first text
-   (only between 8 am and 8 pm, Monday–Saturday, clinic time).
+1. Outreach runs by itself: right after referrals are imported, and every 5 minutes
+   (`OUTREACH_AUTORUN_SECONDS`) for follow-ups. Fake patients with SMS consent get their
+   first text automatically (only between 8 am and 8 pm, Monday–Saturday, clinic time).
+   Set `OUTREACH_AUTORUN=off` in `.env.local` to stop automatic texting.
 2. Open a referral (for example Grace Mwangi). The **Text messages** card shows the
    thread. In the **Patient simulator (prototype)** box, click the patient's date of
    birth chip, then **2**. The slot appears in **Confirm queue** as "SMS".

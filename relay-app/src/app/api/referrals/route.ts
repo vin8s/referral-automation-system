@@ -1,6 +1,8 @@
 // GET /api/referrals — all referrals.
-// POST /api/referrals — ingest referrals { rows, via?: 'upload' | 'manual' }.
+// POST /api/referrals — ingest referrals { rows, via?: 'upload' | 'manual' }, then start outreach.
+import { after } from 'next/server';
 import { withAuth, readJson, jsonError } from '@/server/auth/guard';
+import { runOutreachSoon } from '@/server/sms';
 import { listReferrals, ingestReferrals, type IngestRow } from '@/server/referrals';
 
 export const GET = withAuth(async () => Response.json(await listReferrals()));
@@ -14,5 +16,9 @@ export const POST = withAuth(async (req, _ctx, user) => {
     smsConsent: r?.smsConsent === true,
     smsConsentSource: typeof r?.smsConsentSource === 'string' ? r.smsConsentSource : undefined,
   }));
-  return Response.json(await ingestReferrals(rows, user, body.via === 'manual' ? 'manual' : 'upload'));
+  const result = await ingestReferrals(rows, user, body.via === 'manual' ? 'manual' : 'upload');
+  // New referrals with SMS consent get their first text right away (within quiet hours);
+  // the outreach tick applies every consent, cadence and quiet-hour rule.
+  if (result.consentedCount > 0) after(() => runOutreachSoon('referral import'));
+  return Response.json(result);
 });

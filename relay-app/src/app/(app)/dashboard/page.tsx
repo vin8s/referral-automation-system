@@ -10,7 +10,6 @@ import { Icon } from '@/components/shared/Icon';
 import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList';
 import { useSession } from '@/contexts/SessionContext';
 import { ScheduleFreshnessBanner } from '@/components/shared/ScheduleFreshnessBanner';
-import { RunOutreachButton } from '@/components/shared/RunOutreachButton';
 import type { ConfirmQueue, Referral } from '@/lib/types';
 
 // ── Referral quick-view modal ─────────────────────────────────────────────────
@@ -161,9 +160,7 @@ export default function DashboardPage() {
       <PageHead
         title={`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, ${user.name.split(' ')[0]}`}
         sub={`Today is ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
-      >
-        <RunOutreachButton onDone={fetchAll} />
-      </PageHead>
+      />
 
       <ScheduleFreshnessBanner />
 

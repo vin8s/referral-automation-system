@@ -308,7 +308,7 @@ export interface OutreachSettingsView {
   provider: 'mock' | 'aws' | 'twilio';
   aiProvider: 'mock' | 'bedrock';
   timezone: string;
-  /** Development only: show the "Run outreach now" button. */
+  /** True outside production (development-only tools such as the patient simulator). */
   devTools: boolean;
   updatedAt: string | null;
   updatedBy: string | null;

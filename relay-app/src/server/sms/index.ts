@@ -228,10 +228,32 @@ export async function saveOutreachSettings(raw: unknown, user: SessionUser): Pro
   return getOutreachSettingsView();
 }
 
+const outreachQueue = globalThis as unknown as { __relayOutreachChain?: Promise<unknown> };
+
+/**
+ * Runs one outreach tick. Runs are serialized in this server process (the import
+ * trigger, the automatic timer and the scheduler endpoint can overlap), so two
+ * ticks never read the same "not texted yet" state and text a patient twice.
+ */
 export async function runOutreachNow(now?: Date) {
-  const d = await smsDeps();
-  if (now) d.now = () => now;
-  return runOutreachTick(d);
+  const run = async () => {
+    const d = await smsDeps();
+    if (now) d.now = () => now;
+    return runOutreachTick(d);
+  };
+  const next = (outreachQueue.__relayOutreachChain ?? Promise.resolve()).catch(() => undefined).then(run);
+  outreachQueue.__relayOutreachChain = next.catch(() => undefined);
+  return next;
+}
+
+/** Fire-and-forget outreach run (e.g. right after referrals are imported). Never throws. */
+export async function runOutreachSoon(reason: string): Promise<void> {
+  try {
+    await runOutreachNow();
+  } catch (err) {
+    const { logError } = await import('@/server/log');
+    logError(`outreach run (${reason})`, err);
+  }
 }
 
 // ── MA confirm queue hooks ──────────────────────────────────────────────────

@@ -13,7 +13,7 @@ import type {
   OutreachLogEntry, CalendarEvent, PipelineCount,
   Org, CurrentUser,
   Priority, ReferralLogEntry, RawSettings,
-  SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, OutreachTickResult,
+  SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView,
   EcwImportOverview, EcwImportStatus, EcwImportDraft, EcwApplyResult, EcwImportDetail,
 } from './types';
 import type { EcwImportOptions, EcwMapping } from './ecwImport';
@@ -318,9 +318,4 @@ export async function resolveScheduleReviewItem(
   itemId: string, decision: { action: 'match'; referralId: string } | { action: 'ignore' },
 ): Promise<{ success: boolean; outcome?: string; errorMsg?: string }> {
   return mutate(`/schedule-import/review/${encodeURIComponent(itemId)}`, 'POST', decision);
-}
-
-/** Admin only: run the outreach scheduler once now (the same job EventBridge runs on a schedule). */
-export async function runOutreachNow(): Promise<OutreachTickResult> {
-  return api<OutreachTickResult>('/sms/outreach/tick', { method: 'POST' });
 }

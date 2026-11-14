@@ -3,7 +3,7 @@
 // Listed in PUBLIC_PATHS (src/proxy.ts) because AWS EventBridge Scheduler calls it
 // without a browser session. It authenticates itself, accepting either:
 //   - Authorization: Bearer <OUTREACH_CRON_TOKEN>   (scheduler; constant-time compare), or
-//   - a signed-in ADMIN session                     ("Run outreach now" button).
+//   - a signed-in ADMIN session                     (manual runs while testing).
 // Anything else → 401 (403 for a signed-in non-admin).
 //
 // Development only: ?now=<ISO time> runs the tick as if it were that time (demo the cadence).
