@@ -36,7 +36,7 @@ Related: `docs/AWS_HIPAA_CHECKLIST.md` (why each service is allowed), `docs/clin
 | **AWS account** | Your organization's container for everything in AWS, and the thing that gets the bill. |
 | **Root user** | The email/password that created the account. All-powerful; lock it away after setup. |
 | **IAM Identity Center** | AWS's login system for people (you) who manage the account day to day. |
-| **Region** | Which AWS data-center area your resources live in (we use **us-east-1**, N. Virginia). |
+| **Region** | Which AWS data-center area your resources live in (we use **us-east-2**, Ohio). |
 | **BAA** | Business Associate Agreement: AWS's contract promising to protect PHI. Accepted in **AWS Artifact**. |
 | **CDK** | "Cloud Development Kit": code in `infra/` that describes all the AWS pieces, so you create them with one command instead of 100 clicks. |
 | **CloudFormation** | The AWS service that CDK hands that description to; it creates/updates/deletes the pieces as one **stack**. |
@@ -86,16 +86,20 @@ Use an email address the **owner** controls long-term (e.g. `aws-admin@clinic.or
    [AWS Free Tier FAQ](https://aws.amazon.com/free/faqs/))
 4. Contact type: **Business** (use the clinic's legal name and address). Add a payment card.
 5. Identity check by phone/SMS, then choose **Basic support (free)**.
-6. **Turn on advanced AWS features (required for Relay).** AWS's simplified "new AWS experience" sign-up
-   blocks things Relay needs: accepting the **HIPAA BAA** in AWS Artifact, **IAM Identity Center**,
-   **cross-Region** features (which newer Claude models in Bedrock use), and — on the Free plan — **End User
-   Messaging SMS**. If your account was created that way, use **Activate advanced AWS features**
-   ([AWS docs](https://docs.aws.amazon.com/accounts/latest/reference/activate-advanced-features.html)), and
-   upgrade to the **Paid plan** first so your credits carry over. AWS recommends the advanced sign-up for
-   regulated workloads anyway ([supported services list](https://docs.aws.amazon.com/accounts/latest/reference/supported-services-sign-up-new.html)).
+6. **If you signed up through AWS's simplified "new AWS experience"** (a *project* managed at
+   <https://settings.aws.com>): upgrade to the **Paid plan** first (credits carry over), then use
+   **Activate advanced AWS features** ([AWS docs](https://docs.aws.amazon.com/accounts/latest/reference/activate-advanced-features.html)).
+   Without it the account cannot accept the **HIPAA BAA**. What happens when you activate it (this is what
+   happened for the Relay pilot account):
+   - AWS creates an **organization** with a separate **management account** (used for billing, the BAA and
+     organization-wide policies) and turns your project into a **member account** — Relay runs in the member
+     account (for the pilot: `Relay-Clinic-Test`, account `000755994402`).
+   - The project's **home Region is fixed** (for the pilot: **us-east-2, Ohio**) and a Region-restriction policy
+     denies regional services (End User Messaging, RDS, ECS…) anywhere else. Bedrock AI calls work from any Region.
+   - The BAA is then accepted as the **AWS Organizations BAA** from the management account (Step 4).
 
-**Success:** you can sign in to <https://console.aws.amazon.com> as the **root user**, and the account is on the
-Paid plan with advanced features active.
+**Success:** you can sign in to <https://console.aws.amazon.com> as the **root user** (or the project owner), the
+account is on the Paid plan, and `aws organizations describe-organization` shows your organization.
 
 ### Step 3. Protect the root user with MFA
 **MFA** = multi-factor authentication: a 6-digit code from an app on your phone in addition to the password.
@@ -107,20 +111,33 @@ Paid plan with advanced features active.
 **Success:** the Security credentials page lists one MFA device.
 
 ### Step 4. Accept the AWS BAA (AWS Artifact)
-1. In the console search bar type **Artifact** → open **AWS Artifact** → **Agreements** (left menu).
-2. Tab **Account agreements** → select **AWS Business Associate Addendum** → **Accept agreement**.
-   Read it, tick the boxes, accept. (Only someone allowed to sign for the account owner should do this.)
-3. Download a copy (PDF) and record the date in `docs/clinic/VENDOR_BAA_TRACKER.md` (row "AWS account BAA").
+**Done for the pilot account on 2026-11-13** (AWS Organizations BAA, verified Active from the Relay account).
+For a new account:
+1. If the account is part of an organization (Step 2 item 6), sign in to the **management account**
+   (AWS Settings → "Centrally manage your organization"). Otherwise stay in the Relay account.
+2. Console search bar → **Artifact** → **AWS Artifact** → **Agreements** (left menu).
+3. In an organization: tab **Organization agreements** → **AWS Organizations Business Associate Addendum**
+   (it covers every account in the organization). Standalone account: tab **Account agreements** →
+   **AWS Business Associate Addendum**.
+4. Accepting the NDA only lets you *read* the BAA — it is not the signature. After the NDA, click
+   **Accept agreement**, tick the boxes, accept. If AWS asks to enable Artifact for the organization, say yes.
+   (Only someone allowed to sign for the clinic should do this.)
+5. Record the date in `docs/clinic/VENDOR_BAA_TRACKER.md` (row "AWS account BAA").
 
-**Success:** the agreement shows status **Active**.
+**Success:** the agreement shows status **Active** — and, in an organization, `aws artifact list-customer-agreements`
+run from the **Relay** account lists it too.
 
 ### Step 5. Let administrators see billing
 Still as root: account name → **Account** → scroll to **IAM user and role access to Billing information** →
 **Edit** → tick **Activate IAM Access** → **Update**. (Otherwise your day-to-day admin can't see the bill.)
 
 ### Step 6. Create your day-to-day admin login (IAM Identity Center)
+> **New AWS experience / project accounts:** you already have a day-to-day login through
+> <https://settings.aws.com> (the project owner's sign-in, plus an "Identity Delegated Admin" project AWS created).
+> For the pilot you can **skip this step** and keep using that login; `aws login --profile relay` works with it.
+
 **IAM Identity Center** gives you a separate login so you never use root again.
-1. Make sure the region selector (top-right) says **N. Virginia (us-east-1)**. Search **IAM Identity Center** → **Enable**.
+1. Make sure the region selector (top-right) says **Ohio (us-east-2)**. Search **IAM Identity Center** → **Enable**.
    If asked, choose **Enable with AWS Organizations**.
 2. **Users** → **Add user**: your email, first/last name → **Next** → skip groups → **Add user**. You'll get an invitation email.
 3. **Permission sets** → **Create permission set** → **Predefined** → **AdministratorAccess** → session duration **4 hours** → **Create**.
@@ -133,9 +150,11 @@ Still as root: account name → **Account** → scroll to **IAM user and role ac
 **Success:** you're in the console via the portal, and the top-right shows `AdministratorAccess/your-name`.
 
 ### Step 7. Choose the region and stick to it
-Everything goes in **us-east-1 (N. Virginia)**: it has the widest Bedrock/Claude model availability and End User
-Messaging support. Always check the top-right region selector says **N. Virginia** before creating anything.
-(Prefer **us-west-2 (Oregon)**? That works too: change `relay:region` in `infra/cdk.json` and use it everywhere below.)
+Everything goes in **us-east-2 (Ohio)**, the project's home Region. A project account's organization carries a
+Region-restriction policy: regional services (End User Messaging, RDS, ECS, …) work **only** in the home Region and
+fail elsewhere with "explicit deny in a service control policy". Bedrock AI calls work from any Region. Always check
+the top-right region selector says **Ohio** before creating anything. (A standalone account could use another
+Region: change `relay:region` in `infra/cdk.json` and use it everywhere below.)
 
 ### Step 8. Apply for credits (optional, recommended)
 - 501(c)(3) clinic: **AWS Nonprofit Credit Program** (via TechSoup / <https://aws.amazon.com/government-education/nonprofits/>).
@@ -146,11 +165,14 @@ Messaging support. Always check the top-right region selector says **N. Virginia
 ## Part 2 — Turn on Claude in Bedrock (≈15 min)
 
 **Bedrock** is AWS's service for AI models; Claude runs inside it, covered by your BAA.
-1. Console search **Bedrock** → region **N. Virginia** → left menu **Model catalog**.
+1. Console search **Bedrock** → region **Ohio** → left menu **Model catalog**.
 2. Filter provider **Anthropic**, open the Claude model you'll use. The infrastructure defaults to
-   **Claude Haiku 5.5** (`anthropic.claude-haiku-5-5`, setting `relay:bedrockModelId` in `infra/cdk.json`) — the
-   cheapest current Claude model and a good fit for short scheduling texts. If testing against
-   `docs/CONVERSATION_TEST_CASES.md` shows it missing safety cases, switch to Claude Sonnet 5.5 (`anthropic.claude-sonnet-5-5`).
+   **Claude Haiku 4.5** (`us.anthropic.claude-haiku-4-5-20251001-v1:0`, setting `relay:bedrockModelId` in
+   `infra/cdk.json`), tested live with fake patients. Newer models are only callable through their **`us.` inference
+   profile ID**, never the bare `anthropic.…` ID. Claude Haiku 5.5 (`us.anthropic.claude-haiku-5-5`) is about 10×
+   cheaper per token but was still "not available for this account" on the pilot project account; try it again
+   later and switch if it answers a test message. If testing against `docs/CONVERSATION_TEST_CASES.md` shows a model
+   missing safety cases, step up to Claude Sonnet 5.5 (`us.anthropic.claude-sonnet-5-5`).
 3. The first time you use an Anthropic model, Bedrock asks for a short **use-case form**. Fill it in
    (company = clinic, use case = "patient appointment-scheduling text replies, human-reviewed").
 4. Open **Playground → Chat**, choose the model, type a **fake** test message. **Success:** Claude replies.
@@ -160,6 +182,11 @@ Messaging support. Always check the top-right region selector says **N. Virginia
 ---
 
 ## Part 3 — Get a texting number (start early: days to weeks)
+
+> **Pilot status (2026-11-14):** toll-free number **+1 855-599-7452** is already purchased in us-east-2
+> (`phone-7adfd924a2f448c0b0833047279900b8`) and its toll-free registration exists as a **draft** filled with
+> Rhode Island Free Clinic's public details. Still needed before submitting: the clinic's legal name as registered,
+> EIN, a contact person's name, and a photo/scan of the intake form showing the SMS consent checkbox.
 
 US carriers only deliver business texts from **registered** numbers. Start this as soon as the account exists.
 
@@ -188,8 +215,8 @@ New accounts are in the **SMS sandbox**: texts only go to phone numbers you've v
 **$1/month**. ([AWS docs](https://docs.aws.amazon.com/sms-voice/latest/userguide/sandbox.html))
 1. End User Messaging → SMS → **Overview** → **Request production access** (or open a support case:
    **Support Center → Create case → Service limit increase**, service **End User Messaging SMS**, quota
-   **SMS Production Access**, region **us-east-1**, value **1**).
-2. In the same case (or a second one) ask for a **monthly SMS spending quota of $50** for us-east-1.
+   **SMS Production Access**, region **us-east-2**, value **1**).
+2. In the same case (or a second one) ask for a **monthly SMS spending quota of $50** for us-east-2.
    ([AWS docs](https://docs.aws.amazon.com/sms-voice/latest/userguide/awssupport-spend-threshold.html))
 3. While you wait, add **your own phone** for testing: **Sandbox → Destination phone numbers → Add**, enter the
    code you receive.
@@ -232,8 +259,8 @@ You'll add two DNS records there during deploy (Part 6). Leave `relay:hostedZone
 ```bash
 aws configure sso
 ```
-Answer: session name `relay`, start URL = your **AWS access portal URL**, region `us-east-1`, scopes: press Enter.
-A browser opens: approve. Pick your account and **AdministratorAccess**, default region `us-east-1`, output `json`,
+Answer: session name `relay`, start URL = your **AWS access portal URL**, region `us-east-2`, scopes: press Enter.
+A browser opens: approve. Pick your account and **AdministratorAccess**, default region `us-east-2`, output `json`,
 profile name `relay`. Then, in every new Terminal window:
 ```bash
 export AWS_PROFILE=relay
@@ -246,13 +273,14 @@ Open `infra/cdk.json` and change the `relay:*` values. **Never put passwords or 
 
 | Setting | What to put |
 |---|---|
-| `relay:region` | `us-east-1` |
+| `relay:region` | `us-east-2` |
 | `relay:domainName` | The app address, e.g. `relay.yourclinic.org` |
 | `relay:hostedZoneId` / `relay:hostedZoneName` | Route 53 option: zone ID and `yourclinic.org`. Other registrar: leave both `""` |
-| `relay:cognitoDomainPrefix` | Unique, lowercase, e.g. `relay-yourclinic` (becomes `relay-yourclinic.auth.us-east-1.amazoncognito.com`) |
+| `relay:cognitoDomainPrefix` | Unique, lowercase, e.g. `relay-rifc` (becomes `relay-rifc.auth.us-east-2.amazoncognito.com`) |
 | `relay:alertEmail` | Who gets budget and outage emails |
-| `relay:clinicTimeZone` | e.g. `America/Los_Angeles` |
-| `relay:clinicDisplayName` | Name used in texts, e.g. `Sunrise Free Clinic` |
+| `relay:clinicTimeZone` | `America/New_York` for Rhode Island Free Clinic |
+| `relay:clinicDisplayName` | Name used in texts: `Rhode Island Free Clinic` |
+| `relay:clinicLoginName` | Clinic name on the sign-in screen and in the staff invitation email. Default `Rhode Island Free Clinic`. |
 | `relay:clinicPhoneNumber` | Texting number, `+18885551234` (blank until Part 3 is done) |
 | `relay:smsOriginationIdentity` | Phone number ID from Part 3 step 4 (blank until then) |
 | `relay:bedrockModelId` | From Part 2 |
@@ -279,7 +307,7 @@ Creates a small storage bucket and container registry CDK uses to upload the app
 ```bash
 npx cdk bootstrap
 ```
-**Success:** `Environment aws://123456789012/us-east-1 bootstrapped.`
+**Success:** `Environment aws://123456789012/us-east-2 bootstrapped.`
 
 ### Step 2. Deploy everything
 Make sure Docker Desktop is running, then:
@@ -317,14 +345,17 @@ Check: **CloudWatch → Log groups → `/relay/app`** → newest stream → look
 Fake seed data is **never** loaded in production (the script refuses).
 
 ### Step 5. Create staff logins (Cognito)
-1. Console → **Cognito** → **User pools** → `relay-staff` → **Users** → **Create user**.
-2. **Send an email invitation**, email address = the staff member's work email, **Generate a password** → **Create user**.
-3. **Groups** tab → `admin` (you, clinic lead) or `ma` (medical assistants/front desk) → **Add user to group**.
-   A user in **neither** group cannot sign in.
-4. The staff member opens the app, signs in with the emailed temporary password, sets a new password and scans the
-   authenticator-app QR code (**MFA is required for everyone**).
+Follow **[docs/STAFF_LOGINS.md](STAFF_LOGINS.md)** §1: Cognito → User pools → `relay-staff` → Users → **Create user**
+→ *Send an email invitation*, the person's email, tick **Mark email address as verified**, *Generate a password* →
+then add them to group `admin` (you, clinic lead) or `ma` (medical assistants / front desk). A user in **neither**
+group can't get in. Or use the one CloudShell command in that doc.
 
-**Success:** you can sign in at `AppUrl` and see the dashboard; an `ma` user can't change Settings.
+Each person then opens `AppUrl` → **Sign in** → temporary password (valid 3 days) → new password → scans the QR code
+with an authenticator app. **MFA is required for everyone**; there is no SMS option. Cognito sends these emails
+itself (from no-reply@verificationemail.com), **max 50 emails/day per AWS account**.
+
+**Success:** you can sign in at `AppUrl`; the sign-in page shows the Rhode Island Free Clinic + Relay logo with teal
+buttons; **Sign out** returns you to Relay's "You have been signed out" screen; an `ma` user can't change Settings.
 
 ### Step 6. HTTPS check
 Open `AppUrl` → padlock icon, certificate issued to your domain. `http://` addresses redirect to `https://`.
@@ -404,6 +435,9 @@ cd infra && export AWS_PROFILE=relay && aws sso login && npx cdk deploy
 ```
 The new container starts, runs migrations, passes health checks, then replaces the old one: no downtime.
 
+If a deploy switches the sign-in pages from Cognito's classic hosted UI to **managed login** (first deploy after
+2026-11-14), anyone signed in to Cognito must sign in again. Passwords and authenticator apps are unchanged.
+
 ### Roll back
 - **Automatic:** if the new version fails to start or fails health checks, ECS rolls back to the previous one by
   itself (deployment circuit breaker) and CloudFormation shows `UPDATE_ROLLBACK_COMPLETE`.
@@ -429,7 +463,7 @@ database is ever deleted. Once a month, check RDS → **Automated backups** show
 
 ## Part 10 — Monthly cost
 
-**Estimates, not quotes** (us-east-1, Nov 2026, pilot of 20–50 patients). Check them in the
+**Estimates, not quotes** (us-east-2, Nov 2026, pilot of 20–50 patients). Check them in the
 [AWS Pricing Calculator](https://calculator.aws/). The same table is in `docs/clinic/COST_ESTIMATE.md`.
 
 | Item | Assumption | ≈ $/month | Pricing page |
@@ -490,3 +524,7 @@ long records must be retained (HIPAA documentation rules; ask the lawyer).
 | Login loops back to `/login` | Callback URL mismatch: `relay:domainName` must match the address you open |
 | Texts not received | Sandbox (only verified numbers) / spending limit $1 / registration not approved / `relay:pauseTexting` on |
 | Replies not showing in Relay | SNS subscription not **Confirmed** (Part 7 step 2), or two-way SMS not set on the number |
+| Sign-in page says "redirect_mismatch" / sign-out shows a Cognito error | `APP_URL` doesn't match `relay:domainName`. The callback must be exactly `https://<domain>/api/auth/callback` and the sign-out URLs exactly `https://<domain>/login?signed_out=1` and `…/login?error=no_role` (redeploy after changing the domain). |
+| Sign-in page is plain or blank after deploy | The managed-login style is missing for client `relay-web`: Cognito → Managed login → Styles. Redeploy, or create a style for the client. |
+| "Your account hasn't been given access to Relay" | Add the user to group `ma` or `admin` (docs/STAFF_LOGINS.md §1). |
+| Any AWS call fails with "explicit deny in a service control policy" | You're in the wrong Region: project accounts only allow regional services in their home Region (**us-east-2** for the pilot). |
