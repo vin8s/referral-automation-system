@@ -281,7 +281,7 @@ Open `infra/cdk.json` and change the `relay:*` values. **Never put passwords or 
 | `relay:clinicTimeZone` | `America/New_York` for Rhode Island Free Clinic |
 | `relay:clinicDisplayName` | Name used in texts: `Rhode Island Free Clinic` |
 | `relay:clinicLoginName` | Clinic name on the sign-in screen and in the staff invitation email. Default `Rhode Island Free Clinic`. |
-| `relay:clinicPhoneNumber` | Texting number, `+18885551234` (blank until Part 3 is done) |
+| `relay:clinicPhoneNumber` | The clinic's **scheduling phone line** that patients can call; it appears inside texts as `{{clinic_phone}}` (`docs/SMS_TEMPLATES.md`). For the pilot: `(401) 274-6347`. This is **not** the texting number. |
 | `relay:smsOriginationIdentity` | Phone number ID from Part 3 step 4 (blank until then) |
 | `relay:bedrockModelId` | From Part 2 |
 | `relay:outreachCron` | When the outreach "tick" runs, in the clinic's time zone. Default `cron(0/10 8-19 ? * MON-SAT *)` = every 10 min, 8:00–19:50, Mon–Sat (matches the texting window in AGENT_SAFETY_RULES.md; Relay itself still enforces quiet hours) |
@@ -368,7 +368,7 @@ Open `AppUrl` → padlock icon, certificate issued to your domain. `http://` add
 1. **End User Messaging → SMS → Phone numbers** → your number → **Two-way SMS** tab → **Edit settings**.
 2. Turn on **Enable two-way message**, destination type **Amazon SNS**, **Existing SNS standard topic** →
    `relay-inbound-sms`, permissions **Use SNS topic policies** → **Save**.
-3. If you hadn't filled in `relay:smsOriginationIdentity` / `relay:clinicPhoneNumber` yet, do it now and run
+3. If you hadn't filled in `relay:smsOriginationIdentity` yet, do it now and run
    `npx cdk deploy` again.
 
 ### Step 2. Confirm the SNS → Relay subscription
@@ -414,10 +414,10 @@ Use this if texts are going wrong (wrong patients, bad wording, loops). Staff fa
    {
      "Version": "2012-10-17",
      "Statement": [{ "Sid": "EmergencyPauseAllTexting", "Effect": "Deny",
-       "Action": ["sms-voice:SendTextMessage", "sms-voice:SendMediaMessage"], "Resource": "*" }]
+       "Action": ["sms-voice:SendTextMessage", "sms-voice:SendMediaMessage", "sms-voice:SendRcsMessage"], "Resource": "*" }]
    }
    ```
-   Name it `EMERGENCY-pause-texting` → **Create policy**. From now on AWS refuses every text Relay tries to send
+   Name it `EMERGENCY-pause-texting` → **Create policy**. From now on AWS refuses every text (SMS or RCS) Relay tries to send
    (incoming replies still arrive and are saved).
 2. **EventBridge → Scheduler → `relay-outreach-tick` → Disable** (stops new outreach attempts).
 

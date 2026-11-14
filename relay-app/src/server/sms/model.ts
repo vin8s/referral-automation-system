@@ -298,6 +298,10 @@ const g = globalThis as unknown as { __relaySmsModel?: SmsAgentModel };
 
 export function getSmsAgentModel(): SmsAgentModel {
   const want = aiProviderName();
+  // Fail closed: the rule-based mock is for demos/tests only and must never answer real patients.
+  if (want === 'mock' && process.env.NODE_ENV === 'production') {
+    throw new Error('AI_PROVIDER is unset or "mock", which is refused in production. Set AI_PROVIDER=bedrock.');
+  }
   if (!g.__relaySmsModel || g.__relaySmsModel.name !== want) {
     g.__relaySmsModel = want === 'bedrock' ? new BedrockSmsAgentModel() : new MockSmsAgentModel();
   }
