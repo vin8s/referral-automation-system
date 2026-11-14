@@ -53,10 +53,10 @@
 
 ## Later (not in the pilot)
 
+Relay is SMS-only (2026-11-14): AI phone calls were removed, so no voice vendor (ElevenLabs, Twilio Voice, Amazon Connect) is needed. Twilio SMS test mode is for fake data only and is refused in production, so it needs no BAA.
+
 | Service | What it does | Touches PHI? | Agreement needed | How to get it | Status | Date signed | Notes |
 |---|---|---|---|---|---|---|---|
-| ElevenLabs | AI voice for phone calls | Yes | BAA | Contact ElevenLabs sales; **verify** they offer a BAA and on which plan | Later | | Alternative: Amazon Connect (under AWS BAA). |
-| Twilio | Phone calls / numbers | Yes | BAA | Twilio offers a BAA on certain plans — **verify** current terms | Later | | Alternative: Amazon Connect. |
 | eCW live interface (HL7 SIU feed or API) | Live appointment data from eCW | Yes | eCW interface agreement; possibly an interface vendor BAA | Through clinic's eCW account rep | Later | | Likely has a cost. |
 | Compliance tools (Vanta, Drata) | Compliance tracking | Possibly | BAA if they store PHI | Vendor | Later | | Only if offering Relay to more clinics. |
 

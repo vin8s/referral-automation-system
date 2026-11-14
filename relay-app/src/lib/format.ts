@@ -18,6 +18,22 @@ const MONTH_MAP: Record<string, number> = {
   jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 };
 
+// Display label for a stored outreach outcome. Outcome values are stored as-is in
+// call_attempts (shared with the SMS engine); a few older names read as phone-call
+// wording, so they are relabelled for the texting-only UI.
+const OUTCOME_LABELS: Record<string, string> = {
+  'No Answer': 'No reply yet',
+  'Voicemail Left': 'No reply yet',
+  'Call Back Requested': 'Asked for a call back',
+  'Transferred to Staff': 'Handed to staff',
+  Disconnected: 'Conversation ended',
+};
+
+export function outcomeLabel(outcome: string | null | undefined): string {
+  if (!outcome) return '—';
+  return OUTCOME_LABELS[outcome] ?? outcome;
+}
+
 // Converts any date string to the "Mon Jun 8" format expected by the calendar.
 // Returns null if the string cannot be parsed (entry is dropped from calendar).
 export function normCalDay(raw: string): string | null {

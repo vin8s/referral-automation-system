@@ -437,7 +437,6 @@ export class RelayStack extends Stack {
           CLINIC_LOGIN_NAME: cfg.clinicLoginName,
           SESSION_IDLE_MINUTES: '30',
           SESSION_HOURS: '8',
-          VOICE_ENABLED: 'false',
           AWS_REGION: Aws.REGION,
           SMS_PROVIDER: 'aws',
           SMS_ORIGINATION_IDENTITY: cfg.smsOriginationIdentity,

@@ -65,8 +65,12 @@ real site always needs an Amazon Cognito login.
 
 - **Your changes are saved.** Confirming a slot, editing a referral and so on
   are written to the local database and survive restarts.
-- **Voice calls are off.** Call buttons are greyed out with the note "Voice is
-  off for the pilot". That's expected. See `VOICE_ENABLED` in `relay-app/.env.example`.
+- **Relay is SMS-only.** There are no call buttons; outreach is by text. With
+  `SMS_PROVIDER=mock` (the default) nothing leaves your computer, and each referral has a
+  "Patient simulator (prototype)" box for replying as the patient.
+- **Old local database?** If yours was seeded before 2026-11-14 it may still contain the
+  old fake voice attempts (they're hidden now). Run `npm run db:reset` for the new
+  SMS-only seed data.
 - **Activity is audited.** Every change, and every time someone opens a
   referral, is recorded in the `audit_log` table with who did it.
 - **Texting is simulated.** No real texts are sent and no AI service is called

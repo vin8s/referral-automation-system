@@ -200,7 +200,7 @@ export function ActionQueueList({ items: incoming, compact, onConfirmed }: Actio
                 {!compact && (
                   <Link href={`/referrals/${item.referralId}`}>
                     <button className="btn btn-sm btn-ghost">
-                      <Icon name="transcript" size={12} /> Transcript
+                      <Icon name="sms" size={12} /> Texts
                     </button>
                   </Link>
                 )}

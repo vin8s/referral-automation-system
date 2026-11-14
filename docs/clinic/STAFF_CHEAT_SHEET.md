@@ -9,7 +9,7 @@
 | # | Do this | Where in Relay |
 |---|---|---|
 | 1 | Log in (your own login + MFA code). | — |
-| 2 | Check **red Escalated** items first. | Urgent alerts |
+| 2 | Check **red Escalated** items first. | Confirm queue (top section) |
 | 3 | Work the **amber** items: book each one. | Confirm queue |
 | 4 | Glance at new referrals; make sure SMS consent is "Yes". | Referrals |
 | 5 | Import the eCW schedule (morning, and again after lunch if you can). See below. | eCW import |

@@ -15,27 +15,29 @@ interface NavItem {
 
 const WORKSPACE: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard',     icon: 'home',   href: '/dashboard' },
-  { id: 'alerts',    label: 'Urgent alerts', icon: 'alert',  href: '/alerts' },
   { id: 'action',    label: 'Confirm queue', icon: 'check',  href: '/action' },
   { id: 'referrals', label: 'Referrals',     icon: 'list',   href: '/referrals' },
-  { id: 'calls',     label: 'Referral log',  icon: 'list',   href: '/calls' },
+  { id: 'messages',  label: 'Messages log',  icon: 'sms',    href: '/messages' },
   { id: 'calendar',  label: 'Calendar',      icon: 'cal',    href: '/calendar' },
-  { id: 'analytics', label: 'Analytics',     icon: 'chart',  href: '/analytics' },
 ];
 
 const SYSTEM: NavItem[] = [
-  { id: 'ingest',   label: 'Ingest',    icon: 'upload', href: '/ingest' },
-  { id: 'ecw',      label: 'eCW import', icon: 'refresh', href: '/schedule-import' },
-  { id: 'settings', label: 'Settings',  icon: 'cog',    href: '/settings' },
+  { id: 'ingest',   label: 'Ingest referrals', icon: 'upload',  href: '/ingest' },
+  { id: 'ecw',      label: 'eCW import',       icon: 'refresh', href: '/schedule-import' },
+  { id: 'settings', label: 'Settings',         icon: 'cog',     href: '/settings' },
 ];
 
-interface SidebarCounts {
-  urgentAlerts: number;
-  confirmQueue: number;
-  referrals: number;
-}
+type SidebarCounts = Awaited<ReturnType<typeof getSidebarCounts>>;
 
-function NavLink({ item, active, urgent, count }: { item: NavItem; active: boolean; urgent?: number; count?: number }) {
+const EMPTY_COUNTS: SidebarCounts = { escalations: 0, needsHuman: 0, confirmQueue: 0, referrals: 0 };
+
+/**
+ * Badges keep the two-tier urgency distinct: red = open escalations (safety),
+ * amber = "needs a human" items, neutral = slots to confirm / open referrals.
+ */
+function NavLink({ item, active, escalated, needsHuman, count }: {
+  item: NavItem; active: boolean; escalated?: number; needsHuman?: number; count?: number;
+}) {
   return (
     <Link
       href={item.href}
@@ -43,10 +45,12 @@ function NavLink({ item, active, urgent, count }: { item: NavItem; active: boole
     >
       <Icon name={item.icon} size={15} />
       {item.label}
-      {urgent ? (
-        <span className="nav-count urgent">{urgent}</span>
-      ) : count ? (
-        <span className="nav-count">{count}</span>
+      {(escalated || needsHuman || count) ? (
+        <span className="nav-counts">
+          {escalated ? <span className="nav-count escalated" title={`${escalated} escalated`}>{escalated}</span> : null}
+          {needsHuman ? <span className="nav-count urgent" title={`${needsHuman} need a human`}>{needsHuman}</span> : null}
+          {count ? <span className="nav-count" title={`${count} waiting`}>{count}</span> : null}
+        </span>
       ) : null}
     </Link>
   );
@@ -54,10 +58,10 @@ function NavLink({ item, active, urgent, count }: { item: NavItem; active: boole
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [counts, setCounts] = useState<SidebarCounts>({ urgentAlerts: 0, confirmQueue: 0, referrals: 0 });
+  const [counts, setCounts] = useState<SidebarCounts>(EMPTY_COUNTS);
 
   useEffect(() => {
-    getSidebarCounts().then(setCounts);
+    getSidebarCounts().then(setCounts).catch(() => setCounts(EMPTY_COUNTS));
   }, [pathname]);
 
   return (
@@ -76,7 +80,8 @@ export function Sidebar() {
           key={item.id}
           item={item}
           active={pathname.startsWith(item.href)}
-          urgent={item.id === 'alerts' ? counts.urgentAlerts : undefined}
+          escalated={item.id === 'action' ? counts.escalations : undefined}
+          needsHuman={item.id === 'action' ? counts.needsHuman : undefined}
           count={
             item.id === 'action'    ? counts.confirmQueue :
             item.id === 'referrals' ? counts.referrals    : undefined

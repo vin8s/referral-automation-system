@@ -74,7 +74,6 @@ $1/number + $2–10/campaign per month, plus $4.50 one-time brand registration (
 
 | Item | Rough cost | Notes |
 |---|---|---|
-| Voice calls (ElevenLabs + Twilio, or Amazon Connect) | Per-minute fees; could be $20–100+/mo at pilot volume | Needs BAAs; estimate when planned |
 | eCW live interface (HL7/API) | Unknown — ask eCW rep; can be significant | |
 | Compliance tools (Vanta/Drata) | Often thousands per year | Only if offering Relay to more clinics |
 

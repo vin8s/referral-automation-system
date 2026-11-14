@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { Icon } from '@/components/shared/Icon';
 import { StatePill } from '@/components/shared/StatePill';
 import { CommandPalette } from '@/components/shared/CommandPalette';
-import { useCallQueue } from '@/contexts/CallQueueContext';
 import { useSession } from '@/contexts/SessionContext';
 import { getReferrals } from '@/lib/data';
 import { ROLE_LABEL } from '@/lib/auth-types';
@@ -29,7 +28,7 @@ interface Notification {
 const KIND_ICON: Record<NotifKind, string> = {
   slot_captured:  'cal',
   escalation:     'alert',
-  high_attempts:  'phone',
+  high_attempts:  'sms',
   batch_ingested: 'upload',
   slot_confirmed: 'check',
   aging:          'history',
@@ -38,7 +37,7 @@ const KIND_ICON: Record<NotifKind, string> = {
 
 const KIND_COLOR: Record<NotifKind, string> = {
   slot_captured:  'var(--relay-accent)',
-  escalation:     'var(--relay-urgent)',
+  escalation:     'var(--st-escalated-fg)',
   high_attempts:  '#d97706',
   batch_ingested: 'var(--relay-accent)',
   slot_confirmed: '#16a34a',
@@ -48,7 +47,7 @@ const KIND_COLOR: Record<NotifKind, string> = {
 
 const KIND_BG: Record<NotifKind, string> = {
   slot_captured:  'var(--relay-accent-50)',
-  escalation:     'var(--relay-urgent-50)',
+  escalation:     'var(--st-escalated-bg)',
   high_attempts:  '#fffbeb',
   batch_ingested: 'var(--relay-accent-50)',
   slot_confirmed: '#f0fdf4',
@@ -84,7 +83,7 @@ function deriveNotifications(referrals: Referral[]): Notification[] {
         title: 'Escalation raised',
         body: `${r.patient.name} — ${r.escalation!.reason}`,
         time: r.escalation!.raisedAt,
-        href: '/alerts',
+        href: '/action#escalated',
         read: false,
       });
     });
@@ -97,7 +96,7 @@ function deriveNotifications(referrals: Referral[]): Notification[] {
         id: `high_attempts_${r.id}`,
         kind: 'high_attempts',
         title: `${r.attempts.length} attempts — no booking yet`,
-        body: `${r.patient.name} · ${r.reason} · consider manual outreach`,
+        body: `${r.patient.name} · ${r.reason} · consider staff follow-up`,
         time: r.attempts[r.attempts.length - 1]?.timestamp ?? r.referralTime,
         href: `/referrals/${r.id}`,
         read: false,
@@ -143,7 +142,7 @@ function deriveNotifications(referrals: Referral[]): Notification[] {
       id: 'blocked_outreach',
       kind: 'blocked',
       title: `${blocked.length} referral${blocked.length !== 1 ? 's' : ''} with blocked outreach`,
-      body: blocked.slice(0, 2).map(r => r.patient.name).join(', ') + ' — wrong number or disconnected',
+      body: blocked.slice(0, 2).map(r => r.patient.name).join(', ') + ' — wrong number or conversation ended',
       time: blocked[0].attempts[blocked[0].attempts.length - 1]?.timestamp ?? '',
       href: '/referrals',
       read: true,
@@ -284,11 +283,11 @@ function NotificationPanel({
       {notifs.length > 0 && (
         <div style={{ padding: '10px 16px', borderTop: '1px solid var(--relay-hairline)', textAlign: 'center' }}>
           <Link
-            href="/alerts"
+            href="/action"
             onClick={onClose}
             style={{ fontSize: 12.5, color: 'var(--relay-accent)', fontWeight: 500, textDecoration: 'none' }}
           >
-            View all alerts <Icon name="arrow" size={11} />
+            Open confirm queue <Icon name="arrow" size={11} />
           </Link>
         </div>
       )}
@@ -487,7 +486,6 @@ function UserMenu() {
 // ── TopBar ────────────────────────────────────────────────────────────────────
 
 function TopBarInner() {
-  const { toggleQueue } = useCallQueue();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -503,14 +501,10 @@ function TopBarInner() {
         e.preventDefault();
         setPaletteOpen(true);
       }
-      if (e.key === 'r' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        toggleQueue();
-      }
     }
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [toggleQueue]);
+  }, []);
 
   const unreadCount = notifs.filter(n => !n.read).length;
 

@@ -18,7 +18,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: 'Relay — Referral Conversion Platform',
-  description: 'Voice AI referral conversion for specialist practices',
+  description: 'Text-message referral scheduling for clinics',
   // The web app manifest (app/manifest.ts) is linked automatically.
   applicationName: 'Relay',
   appleWebApp: { capable: true, title: 'Relay', statusBarStyle: 'default' },

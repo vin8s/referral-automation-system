@@ -661,7 +661,7 @@ export async function getImportDetail(ctx: ImportCtx, id: string): Promise<EcwIm
 
 /**
  * Every slot-grid time that must not be offered (Relay captured/confirmed + eCW busy times) —
- * the same list the SMS agent uses; the voice flow reads it via src/lib/data.ts getBookedSlotKeys.
+ * the same list the SMS agent uses.
  */
 export async function listTakenSlots(ctx: ImportCtx): Promise<{ day: string; time: string }[]> {
   return smsRepo.takenSlots(ctx.db);

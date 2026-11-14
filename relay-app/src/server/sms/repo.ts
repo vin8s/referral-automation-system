@@ -160,7 +160,7 @@ export interface Conv {
   repliedSinceOutreach: boolean;
   paused: boolean;
   pausedReason: string | null;
-  channelPreference: 'sms' | 'voice' | 'none';
+  channelPreference: 'sms' | 'none';
   numberSuppressed: boolean;
   redirectsUsed: number;
   aiMessagesDay: string | null;
@@ -196,7 +196,8 @@ function toConv(r: ConvRow): Conv {
     repliedSinceOutreach: r.replied_since_outreach as boolean,
     paused: r.paused as boolean,
     pausedReason: (r.paused_reason as string | null) ?? null,
-    channelPreference: r.channel_preference as Conv['channelPreference'],
+    // Legacy 'voice' rows (pre-004) mean "don't auto-text": treat them as 'none'.
+    channelPreference: r.channel_preference === 'sms' ? 'sms' : 'none',
     numberSuppressed: r.number_suppressed as boolean,
     redirectsUsed: r.redirects_used as number,
     aiMessagesDay: (r.ai_messages_day as string | null) ?? null,
@@ -468,12 +469,4 @@ export async function claimInboundEvent(q: Queryable, snsMessageId: string): Pro
   return rows.length > 0;
 }
 
-// ── Confirm-queue helpers ───────────────────────────────────────────────────
 
-export async function latestAttemptChannels(q: Queryable, referralIds: string[]): Promise<Map<string, string>> {
-  if (!referralIds.length) return new Map();
-  const { rows } = await q.query<{ referral_id: string; channel: string }>(
-    `select distinct on (referral_id) referral_id, channel from call_attempts
-      where referral_id = any($1::text[]) order by referral_id, attempted_at desc, id desc`, [referralIds]);
-  return new Map(rows.map(r => [r.referral_id, r.channel]));
-}

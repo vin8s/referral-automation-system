@@ -60,7 +60,7 @@ function parseEventDate(dayStr: string, timeStr: string): Date {
     if (m[3] === 'am' && h === 12) h = 0;
     return new Date(2026, month, day, h, min);
   }
-  // Fallback for non-standard strings (e.g. ElevenLabs-returned "June 8, 2026")
+  // Fallback for non-standard strings (e.g. "June 8, 2026")
   const fallback = new Date(dayStr);
   return isNaN(fallback.getTime()) ? new Date(PROTOTYPE_TODAY) : fallback;
 }

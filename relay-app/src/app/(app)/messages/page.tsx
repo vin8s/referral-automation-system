@@ -7,22 +7,21 @@ import { utils as xlsxUtils, writeFileXLSX } from 'xlsx';
 import { PageHead } from '@/components/layout/PageHead';
 import { Icon } from '@/components/shared/Icon';
 import { StatePill } from '@/components/shared/StatePill';
-import { TranscriptPanel } from '@/components/shared/TranscriptPanel';
-import { getReferralLog } from '@/lib/data';
-import type { ReferralLogEntry } from '@/lib/types';
+import { SmsThread } from '@/components/shared/SmsThread';
+import { getReferralLog, getSmsThread } from '@/lib/data';
+import type { ReferralLogEntry, SmsMessage } from '@/lib/types';
+
+type LogType = ReferralLogEntry['type'];
 
 function exportLog(entries: ReferralLogEntry[], label: string) {
   const data = entries.map(e => ({
     'Time':               e.at,
     'Patient':            e.patient,
     'Referral ID':        e.referralId,
-    'Type':               e.type === 'ai_call' ? 'AI call' : e.type === 'manual_update' ? 'Manual update' : 'System',
+    'Type':               e.type === 'outreach' ? 'Text outreach' : e.type === 'manual_update' ? 'Manual update' : 'System',
     'Who':                e.who,
     'Event':              e.what,
-    'Channel':            e.channel ?? '',
     'Outcome':            e.outcome ?? '',
-    'Duration':           e.duration ?? '',
-    'Disclosure Played':  e.disclosurePlayed != null ? (e.disclosurePlayed ? 'Yes' : 'No') : '',
     'Escalated':          e.escalated != null ? (e.escalated ? 'Yes' : 'No') : '',
     'Summary':            e.detail ?? '',
   }));
@@ -31,18 +30,24 @@ function exportLog(entries: ReferralLogEntry[], label: string) {
     ({ wch: Math.max(k.length, ...data.map(row => String((row as Record<string, unknown>)[k] ?? '').length)) + 2 })
   );
   const wb = xlsxUtils.book_new();
-  xlsxUtils.book_append_sheet(wb, ws, 'Referral Log');
+  xlsxUtils.book_append_sheet(wb, ws, 'Messages Log');
   const date = new Date().toISOString().slice(0, 10);
-  writeFileXLSX(wb, `relay-referral-log-${label}-${date}.xlsx`);
+  writeFileXLSX(wb, `relay-messages-log-${label}-${date}.xlsx`);
 }
 
-function typeChipStyle(type: ReferralLogEntry['type']): { bg: string; fg: string; label: string } {
-  if (type === 'ai_call')       return { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',  label: 'AI outreach'    };
+function typeChipStyle(type: LogType): { bg: string; fg: string; label: string } {
+  if (type === 'outreach')      return { bg: 'var(--st-outreach-bg)',  fg: 'var(--st-outreach-fg)',  label: 'Text outreach'  };
   if (type === 'manual_update') return { bg: 'var(--st-queued-bg)',    fg: 'var(--st-queued-fg)',    label: 'Manual update'  };
   return                               { bg: 'var(--relay-tint)',       fg: 'var(--relay-ink-3)',     label: 'System'         };
 }
 
 function LogDetailModal({ entry, onClose }: { entry: ReferralLogEntry; onClose: () => void }) {
+  const [messages, setMessages] = useState<SmsMessage[] | null>(null);
+
+  useEffect(() => {
+    getSmsThread(entry.referralId).then(t => setMessages(t.messages)).catch(() => setMessages([]));
+  }, [entry.referralId]);
+
   return (
     <div className="modal-shade" onClick={onClose}>
       <div className="relay-modal" style={{ width: 720 }} onClick={e => e.stopPropagation()}>
@@ -51,7 +56,7 @@ function LogDetailModal({ entry, onClose }: { entry: ReferralLogEntry; onClose: 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h3 style={{ margin: 0, fontSize: 15 }}>{entry.patient}</h3>
               {entry.attempt != null && (
-                <span style={{ fontSize: 12, color: 'var(--relay-ink-3)' }}>· attempt #{entry.attempt}</span>
+                <span style={{ fontSize: 12, color: 'var(--relay-ink-3)' }}>· text outreach #{entry.attempt}</span>
               )}
               {entry.escalated && (
                 <span style={{
@@ -60,27 +65,20 @@ function LogDetailModal({ entry, onClose }: { entry: ReferralLogEntry; onClose: 
                 }}>Escalated</span>
               )}
             </div>
-            <p className="card-sub">
-              {entry.at}
-              {entry.channel && ` · ${entry.channel === 'voice' ? 'Voice' : 'SMS'}`}
-              {entry.duration && ` · ${entry.duration}`}
-            </p>
+            <p className="card-sub">{entry.at} · {entry.what}</p>
           </div>
           <button className="btn btn-sm btn-ghost" onClick={onClose}><Icon name="x" size={13} /></button>
         </div>
         <div className="relay-modal-body">
-          {entry.detail ? (
-            <TranscriptPanel
-              data={{
-                patient: entry.patient,
-                call: `${entry.referralId} · ${entry.what}`,
-                disclosure: entry.disclosurePlayed ?? false,
-                summary: entry.detail,
-                turns: [],
-              }}
-            />
+          {entry.detail && (
+            <div className="transcript-summary" style={{ fontSize: 12.5, marginBottom: 12 }}>
+              <span className="fw-6">AI summary · </span>{entry.detail}
+            </div>
+          )}
+          {messages === null ? (
+            <div style={{ fontSize: 12.5, color: 'var(--relay-ink-3)' }}>Loading texts…</div>
           ) : (
-            <div style={{ fontSize: 13, color: 'var(--relay-ink-2)', padding: '8px 0' }}>{entry.what}</div>
+            <SmsThread messages={messages} maxHeight={320} compact emptyText="No texts recorded for this referral." />
           )}
           <div className="relay-divider" />
           <div className="stack-tight" style={{ fontSize: 12.5 }}>
@@ -88,16 +86,10 @@ function LogDetailModal({ entry, onClose }: { entry: ReferralLogEntry; onClose: 
               <span style={{ color: 'var(--relay-ink-3)' }}>Who</span>
               <span>{entry.who}</span>
             </div>
-            {entry.disclosurePlayed != null && (
-              <div className="between">
-                <span style={{ color: 'var(--relay-ink-3)' }}>Disclosure played</span>
-                <span>{entry.disclosurePlayed ? 'Yes' : 'n/a'}</span>
-              </div>
-            )}
             {entry.escalated != null && (
               <div className="between">
                 <span style={{ color: 'var(--relay-ink-3)' }}>Escalation raised</span>
-                <span>{entry.escalated ? 'Yes — clinical' : 'No'}</span>
+                <span>{entry.escalated ? 'Yes' : 'No'}</span>
               </div>
             )}
             <div className="between">
@@ -112,11 +104,11 @@ function LogDetailModal({ entry, onClose }: { entry: ReferralLogEntry; onClose: 
 }
 
 
-export default function CallsPage() {
+export default function MessagesPage() {
   const router = useRouter();
   const [log, setLog] = useState<ReferralLogEntry[]>([]);
   const [selected, setSelected] = useState<ReferralLogEntry | null>(null);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'ai_call' | 'manual_update' | 'system'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | LogType>('all');
   const [search, setSearch] = useState('');
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
@@ -172,9 +164,9 @@ export default function CallsPage() {
     );
   }
 
-  const typeFilters: { key: 'all' | 'ai_call' | 'manual_update' | 'system'; label: string; dot?: string }[] = [
+  const typeFilters: { key: 'all' | LogType; label: string; dot?: string }[] = [
     { key: 'all',           label: 'All'            },
-    { key: 'ai_call',       label: 'AI outreach',    dot: 'var(--relay-accent)'   },
+    { key: 'outreach',      label: 'Text outreach',  dot: 'var(--relay-accent)'   },
     { key: 'manual_update', label: 'Manual updates', dot: 'var(--st-queued-fg)'   },
     { key: 'system',        label: 'System events',  dot: 'var(--relay-ink-4)'    },
   ];
@@ -191,8 +183,8 @@ export default function CallsPage() {
   return (
     <>
       <PageHead
-        title="Referral log"
-        sub="All activity — AI calls and texts, manual edits, and system events, across every referral."
+        title="Messages log"
+        sub="All texting outreach, manual edits and system events, across every referral."
       >
         <button
           className="btn btn-sm"
@@ -203,7 +195,7 @@ export default function CallsPage() {
           <Icon name="download" size={12} /> Export{filtered.length > 0 ? ` (${filtered.length})` : ''}
         </button>
         <button className="btn btn-sm btn-primary" onClick={() => router.push('/ingest')}>
-          <Icon name="upload" size={12} /> Ingest
+          <Icon name="upload" size={12} /> Ingest referrals
         </button>
       </PageHead>
 
@@ -337,9 +329,9 @@ export default function CallsPage() {
               return (
                 <tr
                   key={i}
-                  className={entry.type === 'ai_call' ? 'row-clickable' : undefined}
-                  onClick={entry.type === 'ai_call' ? () => setSelected(entry) : undefined}
-                  style={{ cursor: entry.type === 'ai_call' ? 'pointer' : 'default' }}
+                  className={entry.type === 'outreach' ? 'row-clickable' : undefined}
+                  onClick={entry.type === 'outreach' ? () => setSelected(entry) : undefined}
+                  style={{ cursor: entry.type === 'outreach' ? 'pointer' : 'default' }}
                 >
                   <td style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12.5, whiteSpace: 'nowrap' }}>{entry.at}</td>
                   <td><span className="name-link">{entry.patient}</span></td>
@@ -358,26 +350,20 @@ export default function CallsPage() {
                     }}>
                       {chip.label}
                     </span>
-                    {entry.channel && (
-                      <span className="tag" style={{ marginLeft: 5, gap: 3 }} title={entry.channel === 'sms' ? 'Text message (SMS)' : 'Voice call'}>
-                        <Icon name={entry.channel === 'sms' ? 'sms' : 'phone'} size={10} />
-                        {entry.channel === 'sms' ? 'SMS' : 'Voice'}
-                      </span>
-                    )}
                   </td>
                   <td style={{ fontSize: 12.5, color: 'var(--relay-ink-3)' }}>{entry.who}</td>
                   <td style={{ fontSize: 12.5, color: 'var(--relay-ink-2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {entry.what}
                   </td>
                   <td style={{ fontSize: 12.5, color: 'var(--relay-ink-3)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {entry.type !== 'ai_call' ? entry.detail ?? '—' : (
+                    {entry.type !== 'outreach' ? entry.detail ?? '—' : (
                       <span style={{ color: 'var(--relay-ink-4)', fontStyle: 'italic' }}>
                         {entry.detail ? entry.detail.substring(0, 80) + (entry.detail.length > 80 ? '…' : '') : '—'}
                       </span>
                     )}
                   </td>
                   <td>
-                    {entry.type === 'ai_call' && (
+                    {entry.type === 'outreach' && (
                       <button
                         className="btn btn-sm btn-ghost"
                         onClick={e => { e.stopPropagation(); setSelected(entry); }}

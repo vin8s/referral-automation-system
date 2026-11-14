@@ -13,6 +13,15 @@ const nextConfig: NextConfig = {
 
   poweredByHeader: false,
 
+  // Screens removed when Relay went SMS-only (2026-11-14): old bookmarks land on
+  // their replacements. Temporary (307) so they can be dropped later.
+  async redirects() {
+    return [
+      { source: "/alerts", destination: "/action", permanent: false },
+      { source: "/calls", destination: "/messages", permanent: false },
+    ];
+  },
+
   async headers() {
     const security = [
       { key: "X-Content-Type-Options", value: "nosniff" },

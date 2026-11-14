@@ -6,13 +6,11 @@
 
 import 'server-only';
 import { getDb, type Queryable } from './db';
-import { normCalDay } from '@/lib/format';
-import { DEFAULT_SETTINGS, VALID_CALL_ORDERS } from '@/lib/settingsDefaults';
+import { normCalDay, outcomeLabel } from '@/lib/format';
 import type { SessionUser } from '@/lib/auth-types';
 import type {
-  Referral, ReferralState, Attempt, ConfirmQueueItem, UrgentAlert, CallLogEntry,
-  CalendarEvent, PipelineCount, ReferralLogEntry, Channel, CallOutcome, Priority,
-  PracticeSettings, TranscriptTurn,
+  Referral, ReferralState, Attempt, ConfirmQueueItem, EscalationItem, OutreachLogEntry,
+  CalendarEvent, PipelineCount, ReferralLogEntry, OutreachOutcome, Priority, TranscriptTurn,
 } from '@/lib/types';
 
 export type Actor = SessionUser;
@@ -34,23 +32,6 @@ function fmtDate(v: Date | string | null | undefined): string {
 
 export function fmtToday(): string {
   return new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: TZ });
-}
-
-function fmtDuration(secs: number | null): string {
-  if (!secs) return '—';
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
-/** Accepts "3m 24s", "24s" or "3:24". */
-function parseDurationToSecs(duration: string): number {
-  if (!duration || duration === '—') return 0;
-  const colon = duration.match(/^(\d+):(\d{2})$/);
-  if (colon) return parseInt(colon[1], 10) * 60 + parseInt(colon[2], 10);
-  const mMatch = duration.match(/(\d+)m/);
-  const sMatch = duration.match(/(\d+)s/);
-  return (mMatch ? parseInt(mMatch[1], 10) * 60 : 0) + (sMatch ? parseInt(sMatch[1], 10) : 0);
 }
 
 function calcAge(isoDob: string | null): number {
@@ -105,9 +86,14 @@ interface ReferralRow {
 }
 interface AttemptRow {
   id: string; referral_id: string; attempted_at: Date; channel: string; outcome: string | null;
-  duration_secs: number | null; disclosure_played: boolean; summary: string | null;
-  transcript: unknown; slot_day: string | null;
+  summary: string | null; transcript: unknown; slot_day: string | null;
 }
+
+/**
+ * Relay is SMS-only. Older databases may still hold voice rows in call_attempts
+ * (the table keeps its historical name); they are never shown or counted.
+ */
+const SMS_ONLY = `channel = 'sms'`;
 interface ApptRow {
   referral_id: string; status: string; day: string; time: string; provider: string;
   captured_at: Date; confirmed_at: Date | null; confirmed_by: string | null; mirror_status: string;
@@ -149,7 +135,7 @@ async function loadReferrals(
 
   const [attempts, appts, audits] = await Promise.all([
     q.query<AttemptRow>(
-      `select * from call_attempts where referral_id = any($1::text[]) order by attempted_at asc, id asc`, [ids]),
+      `select * from call_attempts where referral_id = any($1::text[]) and ${SMS_ONLY} order by attempted_at asc, id asc`, [ids]),
     q.query<ApptRow>(
       `select * from appointments where referral_id = any($1::text[]) and status in ('captured','confirmed')
         order by captured_at desc`, [ids]),
@@ -171,10 +157,7 @@ async function loadReferrals(
     const atts: Attempt[] = (attemptsBy.get(row.id) ?? []).map((a, idx) => ({
       n: idx + 1,
       timestamp: fmtDate(a.attempted_at),
-      channel: a.channel as Channel,
-      outcome: a.outcome as CallOutcome,
-      duration: fmtDuration(a.duration_secs),
-      disclosurePlayed: a.disclosure_played,
+      outcome: a.outcome as OutreachOutcome,
       summary: a.summary ?? '',
       transcript: asTranscript(a.transcript),
       ...(a.slot_day ? { slotDay: a.slot_day } : {}),
@@ -247,14 +230,6 @@ export async function getReferralForView(id: string, actor: Actor): Promise<Refe
   return ref;
 }
 
-/** Phone number for an outbound call, looked up server-side (never trust the browser's number). */
-export async function getPatientPhone(referralId: string): Promise<string | null> {
-  const db = await getDb();
-  const { rows } = await db.query<{ phone: string | null }>(
-    `select p.phone from referrals r join patients p on p.id = r.patient_id where r.id = $1`, [referralId]);
-  return rows[0]?.phone ?? null;
-}
-
 const PLACEHOLDER_SLOT = { day: 'To be confirmed', time: 'TBD', provider: 'TBD', capturedAgoMin: null };
 
 export async function listConfirmQueue(): Promise<ConfirmQueueItem[]> {
@@ -275,12 +250,12 @@ export async function listConfirmQueue(): Promise<ConfirmQueueItem[]> {
       capturedAgoMin: slot.capturedAgoMin,
       priority: r.priority,
       summary: last?.summary ?? '',
-      transcript: last?.transcript ?? [],
     };
   });
 }
 
-export async function listUrgentAlerts(): Promise<UrgentAlert[]> {
+/** Red Escalated referrals (safety), unclaimed first. Shown at the top of the confirm queue. */
+export async function listEscalations(): Promise<EscalationItem[]> {
   const refs = await loadReferrals(await getDb(), { states: ['Escalated'] });
   return refs.filter(r => r.escalation).map(r => ({
     referralId: r.id,
@@ -289,16 +264,17 @@ export async function listUrgentAlerts(): Promise<UrgentAlert[]> {
     severity: r.escalation!.severity,
     raisedAt: r.escalation!.raisedAt,
     owner: r.escalation!.owner,
-    transcriptExcerpt: r.attempts[r.attempts.length - 1]?.transcript?.slice(-2) ?? [],
-  }));
+    excerpt: r.attempts[r.attempts.length - 1]?.transcript?.slice(-2) ?? [],
+  })).sort((x, y) => Number(!!x.owner) - Number(!!y.owner));
 }
 
-export async function listCallLog(): Promise<CallLogEntry[]> {
+/** Every text outreach attempt, newest first (dashboard "Recent texting outreach"). */
+export async function listOutreachLog(): Promise<OutreachLogEntry[]> {
   const refs = await listReferrals();
-  const entries: (CallLogEntry & { sortKey: number })[] = [];
+  const entries: (OutreachLogEntry & { sortKey: number })[] = [];
   const db = await getDb();
   const { rows } = await db.query<{ referral_id: string; attempted_at: Date }>(
-    'select referral_id, attempted_at from call_attempts order by attempted_at asc, id asc');
+    `select referral_id, attempted_at from call_attempts where ${SMS_ONLY} order by attempted_at asc, id asc`);
   const times = new Map<string, number[]>();
   for (const a of rows) (times.get(a.referral_id) ?? times.set(a.referral_id, []).get(a.referral_id)!).push(new Date(a.attempted_at).getTime());
   for (const r of refs) {
@@ -308,13 +284,9 @@ export async function listCallLog(): Promise<CallLogEntry[]> {
       language: r.patient.language,
       timestamp: a.timestamp,
       attempt: a.n,
-      channel: a.channel,
       outcome: a.outcome,
-      duration: a.duration,
       summary: a.summary,
-      hasTranscript: a.transcript.length > 0,
       escalated: a.outcome === 'Escalated',
-      disclosurePlayed: a.disclosurePlayed,
       referralState: r.state,
       sortKey: times.get(r.id)?.[i] ?? 0,
     }));
@@ -328,6 +300,7 @@ export async function listReferralLog(): Promise<ReferralLogEntry[]> {
     db.query<AttemptRow & { state: string; patient: string }>(
       `select a.*, r.state, p.name as patient
          from call_attempts a join referrals r on r.id = a.referral_id join patients p on p.id = r.patient_id
+        where a.${SMS_ONLY}
         order by a.attempted_at asc, a.id asc`),
     db.query<AuditRow & { state: string | null; patient: string | null }>(
       `select l.referral_id, l.created_at, l.actor_name, l.actor_role, l.what, r.state, p.name as patient
@@ -345,17 +318,13 @@ export async function listReferralLog(): Promise<ReferralLogEntry[]> {
       referralId: a.referral_id,
       patient: a.patient ?? '—',
       at: fmtDate(a.attempted_at),
-      type: 'ai_call',
-      who: 'AI agent',
-      what: `${a.channel === 'voice' ? 'Voice' : 'SMS'} · ${a.outcome}`,
+      type: 'outreach',
+      who: 'Texting assistant',
+      what: `Text outreach · ${outcomeLabel(a.outcome)}`,
       referralState: a.state === 'In Progress' ? 'Attempted' : (a.state as ReferralState),
       detail: a.summary ?? undefined,
-      channel: a.channel as Channel,
       outcome: a.outcome ?? undefined,
-      duration: fmtDuration(a.duration_secs),
-      disclosurePlayed: a.disclosure_played,
       escalated: a.outcome === 'Escalated',
-      hasTranscript: asTranscript(a.transcript).length > 0,
       attempt: n,
     });
   }
@@ -396,7 +365,7 @@ export async function listCalendarEvents(): Promise<CalendarEvent[]> {
 async function derivedStateCounts(): Promise<Map<ReferralState, number>> {
   const db = await getDb();
   const { rows } = await db.query<{ state: string; attempted: boolean; n: number }>(
-    `select r.state, exists(select 1 from call_attempts a where a.referral_id = r.id) as attempted, count(*)::int as n
+    `select r.state, exists(select 1 from call_attempts a where a.referral_id = r.id and a.${SMS_ONLY}) as attempted, count(*)::int as n
        from referrals r group by 1, 2`);
   const m = new Map<ReferralState, number>();
   for (const row of rows) {
@@ -411,19 +380,21 @@ export async function getPipeline(): Promise<PipelineCount[]> {
   return REFERRAL_STATES.map(s => ({ state: s, count: counts.get(s) ?? 0 }));
 }
 
+/** Confirm-queue badges: red escalations, amber needs-a-human items, slots to confirm; plus open referrals. */
 export async function getSidebarCounts() {
-  const counts = await derivedStateCounts();
+  const db = await getDb();
+  const [counts, needsHuman] = await Promise.all([
+    derivedStateCounts(),
+    db.query<{ n: number }>(`select count(*)::int as n from needs_human_items where resolved_at is null`),
+  ]);
   let total = 0;
   for (const n of counts.values()) total += n;
   return {
-    urgentAlerts: counts.get('Escalated') ?? 0,
+    escalations: counts.get('Escalated') ?? 0,
+    needsHuman: needsHuman.rows[0]?.n ?? 0,
     confirmQueue: counts.get('Pending Confirmation') ?? 0,
     referrals: total - (counts.get('Booked') ?? 0),
   };
-}
-
-export async function getEscalatedCount(): Promise<number> {
-  return (await derivedStateCounts()).get('Escalated') ?? 0;
 }
 
 // ── Mutations ────────────────────────────────────────────────────────────────
@@ -515,52 +486,6 @@ export async function updateReferralState(referralId: string, state: ReferralSta
   });
 }
 
-export async function createCapturedSlot(
-  referralId: string, slot: { day: string; time: string; provider: string }, actor: Actor,
-): Promise<Result> {
-  const db = await getDb();
-  return db.transaction(async tx => {
-    if (!(await referralExists(tx, referralId))) return { success: false };
-    // Only one live captured slot per referral.
-    await tx.query(`update appointments set status = 'expired' where referral_id = $1 and status = 'captured'`, [referralId]);
-    await tx.query(
-      `insert into appointments (referral_id, status, day, time, provider, mirror_status)
-       values ($1, 'captured', $2, $3, $4, 'pending')`, [referralId, slot.day, slot.time, slot.provider]);
-    await audit(tx, actor, referralId, 'slot.capture', `Captured slot ${slot.day} ${slot.time}`);
-    return { success: true };
-  });
-}
-
-export async function addCallAttempt(
-  referralId: string, attempt: Omit<Attempt, 'n'>, actor: Actor,
-): Promise<{ success: boolean; errorMsg?: string }> {
-  const db = await getDb();
-  return db.transaction(async tx => {
-    if (!(await referralExists(tx, referralId))) return { success: false, errorMsg: 'Referral not found' };
-    await tx.query(
-      `insert into call_attempts (referral_id, channel, outcome, duration_secs, disclosure_played, summary, transcript, slot_day)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
-      [referralId, attempt.channel, attempt.outcome, parseDurationToSecs(attempt.duration),
-        attempt.disclosurePlayed, attempt.summary, JSON.stringify(attempt.transcript ?? []), attempt.slotDay ?? null]);
-    await audit(tx, actor, referralId, 'attempt.add',
-      `${attempt.channel === 'voice' ? 'Voice' : 'SMS'} call: ${attempt.outcome} · ${attempt.duration}`);
-    return { success: true };
-  });
-}
-
-export async function patchLatestTranscript(referralId: string, turns: TranscriptTurn[], actor: Actor): Promise<Result> {
-  const db = await getDb();
-  return db.transaction(async tx => {
-    const { rows } = await tx.query(
-      `update call_attempts set transcript = $2::jsonb
-        where id = (select id from call_attempts where referral_id = $1 order by attempted_at desc limit 1)
-        returning id`, [referralId, JSON.stringify(turns)]);
-    if (rows.length === 0) return { success: false };
-    await audit(tx, actor, referralId, 'attempt.transcript', 'Call transcript attached');
-    return { success: true };
-  });
-}
-
 export interface ReferralDraft {
   patientName?: string; dateOfBirth?: string; phone?: string; language?: string;
   insurance?: string; reason?: string; referringProvider?: string; priority?: string;
@@ -606,68 +531,51 @@ export interface IngestRow {
   patientName: string; dateOfBirth?: string; phone: string; sex?: 'M' | 'F' | '';
   language?: string; insurance?: string; reason?: string; referringProvider?: string;
   priority?: Priority; location?: string;
+  /**
+   * SMS consent is never assumed: only an explicit `true` records consent (with
+   * who recorded it and where it came from). Anything else leaves consent off,
+   * so the texting assistant will not contact the patient until staff record it.
+   */
+  smsConsent?: boolean;
+  /** Where consent was obtained, e.g. "intake form", "verbal at front desk". */
+  smsConsentSource?: string;
 }
 
-export async function ingestReferrals(rows: IngestRow[], actor: Actor): Promise<{ success: boolean; importedCount: number }> {
+export async function ingestReferrals(
+  rows: IngestRow[], actor: Actor, via: 'upload' | 'manual' = 'upload',
+): Promise<{ success: boolean; importedCount: number; consentedCount: number }> {
   const db = await getDb();
   return db.transaction(async tx => {
     const { rows: maxRows } = await tx.query<{ max: number | null }>(
       `select max(substring(id from 5)::int) as max from referrals where id ~ '^REF-[0-9]+$'`);
     let next = Math.max(maxRows[0]?.max ?? 0, 1042) + 1;
     let importedCount = 0;
+    let consentedCount = 0;
     for (const row of rows) {
       if (!row.patientName?.trim() || !row.phone?.trim()) continue;
+      const consent = row.smsConsent === true;
+      const consentSource = consent
+        ? `${(row.smsConsentSource?.trim() || 'referral intake').slice(0, 80)} (recorded by ${actor.name})`
+        : null;
       const { rows: pt } = await tx.query<{ id: string }>(
-        `insert into patients (name, phone, language, insurance, sex, date_of_birth)
-         values ($1, $2, $3, $4, $5, $6::date) returning id`,
+        `insert into patients (name, phone, language, insurance, sex, date_of_birth,
+           sms_consent, sms_consent_at, sms_consent_source)
+         values ($1, $2, $3, $4, $5, $6::date, $7::boolean, case when $7::boolean then now() end, $8) returning id`,
         [row.patientName.trim(), row.phone.trim(), row.language || 'English', row.insurance ?? '',
-          row.sex === 'F' ? 'F' : 'M', mdyToIso(row.dateOfBirth)]);
+          row.sex === 'F' ? 'F' : 'M', mdyToIso(row.dateOfBirth), consent, consentSource]);
       const referralId = `REF-${next++}`;
       await tx.query(
         `insert into referrals (id, patient_id, reason, referring_provider, referral_source, location, priority, state)
-         values ($1, $2, $3, $4, 'Uploaded batch', $5, $6, 'Queued')`,
-        [referralId, pt[0].id, row.reason ?? '', row.referringProvider ?? '', row.location || 'Mission Bay',
+         values ($1, $2, $3, $4, $5, $6, $7, 'Queued')`,
+        [referralId, pt[0].id, row.reason ?? '', row.referringProvider ?? '',
+          via === 'manual' ? 'Manual entry' : 'Uploaded batch', row.location || 'Mission Bay',
           row.priority === 'urgent' ? 'urgent' : 'normal']);
-      await audit(tx, actor, referralId, 'referral.ingest', 'Ingested via spreadsheet upload');
+      await audit(tx, actor, referralId, 'referral.ingest',
+        `${via === 'manual' ? 'Entered manually' : 'Ingested via spreadsheet upload'} · ` +
+        (consent ? `SMS consent recorded (${consentSource})` : 'SMS consent not recorded — no texts until staff record it'));
       importedCount++;
+      if (consent) consentedCount++;
     }
-    return { success: true, importedCount };
+    return { success: true, importedCount, consentedCount };
   });
-}
-
-// ── Settings ─────────────────────────────────────────────────────────────────
-
-function sanitizeSettings(raw: unknown): PracticeSettings {
-  const c = (raw as { cadence?: Record<string, unknown> } | null)?.cadence ?? {};
-  const d = DEFAULT_SETTINGS.cadence;
-  const interval = Number(c.intervalMinutes);
-  const max = Number(c.maxCallsPerSession);
-  const order = c.callOrder as string;
-  return {
-    cadence: {
-      intervalMinutes: Number.isFinite(interval) && interval > 0 && interval <= 1440 ? interval : d.intervalMinutes,
-      maxCallsPerSession: Number.isInteger(max) && max > 0 && max <= 500 ? max : d.maxCallsPerSession,
-      callOrder: (VALID_CALL_ORDERS as readonly string[]).includes(order)
-        ? (order as PracticeSettings['cadence']['callOrder']) : d.callOrder,
-    },
-  };
-}
-
-export async function getSettings(): Promise<PracticeSettings> {
-  const db = await getDb();
-  const { rows } = await db.query<{ settings: unknown }>(`select settings from practice_settings where id = 'default'`);
-  return sanitizeSettings(rows[0]?.settings ?? DEFAULT_SETTINGS);
-}
-
-export async function saveSettings(input: unknown, actor: Actor): Promise<PracticeSettings> {
-  const settings = sanitizeSettings(input);
-  const db = await getDb();
-  await db.transaction(async tx => {
-    await tx.query(
-      `insert into practice_settings (id, settings, updated_at, updated_by) values ('default', $1::jsonb, now(), $2)
-       on conflict (id) do update set settings = excluded.settings, updated_at = now(), updated_by = excluded.updated_by`,
-      [JSON.stringify(settings), actor.id]);
-    await audit(tx, actor, null, 'settings.update', 'Practice settings updated');
-  });
-  return settings;
 }
