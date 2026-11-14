@@ -15,6 +15,7 @@ import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList'
 import { TranscriptPanel } from '@/components/shared/TranscriptPanel';
 import { useSession } from '@/contexts/SessionContext';
 import { RunQueueButton } from '@/components/shared/VoiceOff';
+import { ScheduleFreshnessBanner } from '@/components/shared/ScheduleFreshnessBanner';
 import type {
   ConfirmQueueItem, PipelineCount, Referral,
   CallLogEntry, CalendarEvent, UrgentAlert, DashboardFunnelStep,
@@ -527,6 +528,8 @@ export default function DashboardPage() {
       >
         <RunQueueButton />
       </PageHead>
+
+      <ScheduleFreshnessBanner />
 
       <div className="stack">
         {/* Row 1 — action queue + stats card + AI call log */}

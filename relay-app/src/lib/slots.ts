@@ -30,6 +30,32 @@ export function takenSlotKeys(slots: ({ day: string; time: string } | null | und
   return keys;
 }
 
+/** Assumed length of one offered slot, used to check overlap with eCW appointments. */
+export const SLOT_LENGTH_MIN = 30;
+
+function gridMinutes(t: string): number {
+  const m = t.match(/^(\d{1,2}):(\d{2}) (AM|PM)$/)!;
+  return ((+m[1] % 12) + (m[3] === 'PM' ? 12 : 0)) * 60 + +m[2];
+}
+
+/**
+ * Maps busy intervals from the eCW schedule (local date "YYYY-MM-DD", start minute,
+ * duration) onto the slot grid: every grid time that overlaps a busy interval is taken.
+ */
+export function busySlotsOnGrid(busy: { date: string; startMin: number; durationMin: number }[]): { day: string; time: string }[] {
+  const out: { day: string; time: string }[] = [];
+  for (const b of busy) {
+    const [y, m, d] = b.date.split('-').map(Number);
+    if (!y || !m || !d) continue;
+    const end = b.startMin + Math.max(1, b.durationMin);
+    for (const t of ALL_SLOT_TIMES) {
+      const s = gridMinutes(t);
+      if (b.startMin < s + SLOT_LENGTH_MIN && end > s) out.push({ day: dayKeyOf(y, m, d), time: t });
+    }
+  }
+  return out;
+}
+
 /**
  * Returns n upcoming weekday dates with free times and pre-formatted spoken labels,
  * so the voice agent mirrors the exact format ("Tuesday, June 11th at 4:00 PM").

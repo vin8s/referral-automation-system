@@ -35,6 +35,27 @@ function mdyToIso(dob: string): string | null {
   return m ? `${m[3]}-${m[1]}-${m[2]}` : null;
 }
 
+/**
+ * Fake eCW MRN for a seeded referral: "REF-1042" → "201042". The sample eCW export
+ * (test/fixtures/ecw-appointments-sample.csv) uses these numbers.
+ */
+export function seedMrn(referralId: string): string {
+  return `20${referralId.replace(/\D/g, '')}`;
+}
+
+/**
+ * Development databases seeded before migration 003 have no MRNs: fill them in for
+ * seed patients only (identified by the seed consent marker). Real data is never touched.
+ * The same person (name + DOB) gets the MRN of their lowest referral id, as in insertAll.
+ */
+export async function backfillSeedMrns(db: Queryable): Promise<void> {
+  await db.query(
+    `update patients p set mrn = x.mrn
+       from (select p2.id, '20' || regexp_replace(min(r2.id) over (partition by p2.name, p2.date_of_birth), '[^0-9]', '', 'g') as mrn
+               from patients p2 join referrals r2 on r2.patient_id = p2.id) x
+      where x.id = p.id and p.mrn is null and p.sms_consent_source = 'seed (fake data)'`);
+}
+
 function actorFor(who: string): { name: string | null; role: string } {
   if (who === 'AI agent') return { name: 'AI agent', role: 'ai' };
   if (who === 'System') return { name: null, role: 'system' };
@@ -42,12 +63,15 @@ function actorFor(who: string): { name: string | null; role: string } {
 }
 
 async function insertAll(tx: Queryable): Promise<void> {
+  const mrnByPerson = new Map<string, string>();   // the same person (name + DOB) keeps one MRN
   for (const r of mockReferrals) {
     const p = r.patient;
+    const person = `${p.name}|${p.dateOfBirth}`;
+    if (!mrnByPerson.has(person)) mrnByPerson.set(person, seedMrn(r.id));
     const { rows } = await tx.query<{ id: string }>(
-      `insert into patients (name, date_of_birth, sex, phone, language, insurance)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [p.name, mdyToIso(p.dateOfBirth), p.sex, p.phone, p.language, p.insurance],
+      `insert into patients (name, date_of_birth, sex, phone, language, insurance, mrn)
+       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+      [p.name, mdyToIso(p.dateOfBirth), p.sex, p.phone, p.language, p.insurance, mrnByPerson.get(person)],
     );
     const patientId = rows[0].id;
     const referralTime = mockTimeToIso(r.referralTime);
@@ -128,6 +152,7 @@ export async function seedIfEmpty(db: Db): Promise<boolean> {
 
 /** Deletes all app data (keeps the schema). Used by `npm run db:reset`. */
 export async function truncateAll(db: Db): Promise<void> {
-  await db.query(`truncate audit_log, appointments, call_attempts, messages, sms_conversations, needs_human_items,
+  await db.query(`truncate ecw_import_review, ecw_busy_slots, ecw_appointments, ecw_imports, ecw_import_profiles,
+    audit_log, appointments, call_attempts, messages, sms_conversations, needs_human_items,
     sms_inbound_events, referrals, patients, practice_settings`);
 }

@@ -56,6 +56,8 @@ export const REASON_LABELS: Record<string, string> = {
   off_topic_repeated: 'Off-topic / abusive', agent_error: 'AI error — nothing sent',
   cadence_exhausted: 'No reply after final text', urgent_referral: 'Urgent referral — call today',
   opted_back_in: 'Opted back in (START)',
+  ecw_no_show: 'No show in eCW — call first', ecw_rescheduled: 'Rescheduled in eCW — check new time',
+  ecw_cancelled: 'Cancelled in eCW — call patient',
 };
 
 function toItem(r: repo.NeedsHumanRow & { patient: string }): NeedsHumanItem {

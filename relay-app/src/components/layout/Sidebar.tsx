@@ -25,6 +25,7 @@ const WORKSPACE: NavItem[] = [
 
 const SYSTEM: NavItem[] = [
   { id: 'ingest',   label: 'Ingest',    icon: 'upload', href: '/ingest' },
+  { id: 'ecw',      label: 'eCW import', icon: 'refresh', href: '/schedule-import' },
   { id: 'settings', label: 'Settings',  icon: 'cog',    href: '/settings' },
 ];
 

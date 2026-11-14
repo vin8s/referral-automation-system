@@ -1,6 +1,8 @@
 // Relay — canonical TypeScript types
 // State names match REFERRAL_STATUSES.md exactly.
 
+import type { EcwImportOptions, EcwMapping } from './ecwImport';
+
 export type ReferralState =
   | 'Queued'
   | 'In Progress'
@@ -73,6 +75,8 @@ export interface Patient {
   phone: string;
   language: string;
   insurance: string;
+  /** eCW MRN / Account No (used to match the eCW schedule import). */
+  mrn?: string;
 }
 
 export interface Escalation {
@@ -413,3 +417,117 @@ export interface OutreachTickResult {
   amber: number;
   skipped: Record<string, number>;
 }
+
+// ── eCW schedule import ─────────────────────────────────────────────────────
+
+export type EcwAction =
+  | 'book' | 'update_time' | 'record_visit'
+  | 'reenter_cancelled' | 'reenter_no_show' | 'reenter_rescheduled'
+  | 'none' | 'review' | 'ignore' | 'invalid';
+
+export interface EcwImportCounts {
+  total: number; matched: number; booked: number; updated: number; visits: number;
+  reentered: number; review: number; ignored: number; invalid: number; unchanged: number;
+}
+
+export interface EcwCandidate { referralId: string; patient: string; dob: string; state: ReferralState }
+
+export interface EcwPreviewRow {
+  rowNumber: number;
+  patient: string;
+  dob: string | null;
+  mrn: string | null;
+  date: string | null;          // "Tue Nov 17, 2026"
+  time: string | null;          // "10:30 AM"
+  provider: string | null;
+  status: string;               // eCW status as written (or category label)
+  referralId: string | null;
+  referralPatient: string | null;
+  referralState: ReferralState | null;
+  matchLabel: string | null;    // "MRN", "DOB + name", …
+  confidence: 'high' | 'medium' | null;
+  action: EcwAction;
+  actionLabel: string;
+  detail: string;
+  candidates?: EcwCandidate[];
+}
+
+export interface EcwImportPreview {
+  rows: EcwPreviewRow[];
+  counts: EcwImportCounts;
+  rangeStart: string | null;    // "Nov 16, 2026"
+  rangeEnd: string | null;
+  providers: string[];
+  defaultBusyProviders: string[];
+}
+
+export interface EcwImportDraft {
+  importId: string;
+  fileName: string;
+  rowCount: number;
+  headers: string[];
+  sample: string[][];
+  mapping: EcwMapping;
+  options: EcwImportOptions;
+  profileName: string | null;
+  problems: string[];
+  preview: EcwImportPreview | null;
+  /** This exact file was already applied before (re-imports are safe; nothing changes twice). */
+  alreadyApplied: { at: string; by: string } | null;
+  timezone: string;
+}
+
+export interface EcwApplyResult {
+  success: boolean;
+  importId?: string;
+  counts?: EcwImportCounts;
+  openReview?: number;
+  errorMsg?: string;
+}
+
+export interface EcwImportSummary {
+  id: string;
+  fileName: string;
+  status: 'draft' | 'applied' | 'discarded' | 'expired';
+  createdAt: string;
+  createdBy: string;
+  appliedAt: string | null;
+  appliedBy: string | null;
+  rangeStart: string | null;
+  rangeEnd: string | null;
+  counts: EcwImportCounts | null;
+  openReview: number;
+}
+
+export interface EcwReviewItem {
+  id: string;
+  importId: string;
+  rowNumber: number;
+  reason: string;
+  reasonLabel: string;
+  detail: string;
+  row: { patient: string; dob: string | null; mrn: string | null; date: string | null; time: string | null; provider: string | null; status: string };
+  candidates: EcwCandidate[];
+  status: 'open' | 'matched' | 'ignored';
+  outcome: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+}
+
+export interface EcwImportStatus {
+  lastAppliedAt: string | null;
+  lastAppliedBy: string | null;
+  stale: boolean;
+  never: boolean;
+  hoursAgo: number | null;
+  staleHours: number;
+  openReview: number;
+}
+
+export interface EcwImportOverview {
+  imports: EcwImportSummary[];
+  status: EcwImportStatus;
+  profiles: { id: string; name: string; updatedAt: string; updatedBy: string | null }[];
+}
+
+export interface EcwImportDetail { summary: EcwImportSummary; review: EcwReviewItem[] }

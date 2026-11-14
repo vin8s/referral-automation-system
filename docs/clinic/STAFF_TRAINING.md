@@ -71,6 +71,18 @@ Each attendee does at least two. Use fake referrals prepared in advance.
 | 6 | Patient texts in Spanish | Check the AI answered in Spanish; if anything is unclear, use the interpreter process |
 | 7 | Relay won't load | Tell [Owner], switch to Plan B (phone calls) |
 
+### Daily eCW schedule import (do it once together during practice)
+
+Relay only knows what happens in eCW when staff upload the schedule. Practice with the fake file `relay-app/test/fixtures/ecw-appointments-sample.csv` (training environment only).
+
+1. In eCW, run **[eCW report name]** for today + the next 14 days and export it as CSV/Excel. *(Which report to use is still being decided with the clinic — see open questions. Look under eCW **Reports** for an appointment list / appointment report that can be run for a date range and exported. It needs appointment date, time, patient name, DOB, and ideally Account No/MRN, provider and status.)*
+2. Relay → **eCW import** → drop the file. Check the column dropdowns once and save the mapping.
+3. Read the preview: **nothing changes until Apply**. Point out "Mark Booked", "Back to outreach", "Needs review".
+4. Apply. Then handle the amber **Needs review** rows: pick the referral, or Ignore.
+5. Show the amber **No show in eCW — call first** item: texting is paused until a person calls.
+
+Ask: *"The dashboard says schedule data may be stale. What do you do?"* → Run the eCW report and import it now.
+
 ## 0:25–0:28 — Plan B and security
 
 - Relay down → call patients like before. See `PLAN_B.md`. Tell [Owner name].

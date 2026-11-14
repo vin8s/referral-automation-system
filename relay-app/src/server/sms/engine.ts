@@ -20,7 +20,7 @@ import { phoneKey, type SmsProvider } from './provider';
 import { measureSms } from './segments';
 import * as repo from './repo';
 import { AI_ACTOR, SYSTEM_ACTOR, type AuditActor, type Conv, type RefCtx } from './repo';
-import { isWithinSendWindow, localDate, nextSendWindow, zonedParts, type OutreachSettings } from './schedule';
+import { ageOn, isWithinSendWindow, localDate, nextSendWindow, zonedParts, type OutreachSettings } from './schedule';
 import { buildOfferedSlots } from './slots';
 import { IMMEDIATE_TEMPLATES, renderTemplate, type Lang, type TemplateId, type TemplateVars } from './templates';
 import type { HistoryTurn, OfferedSlot, RedCode, SmsTurnOutput, TurnContext } from './types';
@@ -643,5 +643,56 @@ export async function afterSlotRejected(d: SmsDeps, referralId: string, rejected
     return null;
   }
   return sendTemplate(d, ref, 'slot_offer', langFor(ref, conv), slotVars(slots, langFor(ref, conv)));
+}
+
+// ── Re-entry into outreach after an eCW cancellation / no-show (CSV import) ──
+
+/**
+ * Resets the per-referral texting cycle so outreach starts over: identity must be
+ * checked again (R4.4), old offers and the captured slot are void, the 0/2/5/9
+ * cadence restarts. The lifetime cap (outreach_count) is NOT reset (R7.3).
+ * Runs inside the import transaction; sends nothing.
+ */
+export async function resetOutreachForReentry(q: Queryable, referralId: string): Promise<void> {
+  await repo.getConv(q, referralId);
+  await repo.updateConv(q, referralId, {
+    cycleStep: 0, cycleStartedAt: null, repliedSinceOutreach: false, exhausted: false,
+    identityVerified: false, identityAttempts: 0, offeredSlots: [], capturedSlotId: null,
+  });
+}
+
+/**
+ * A Booked appointment was cancelled in eCW and the referral is back In Progress:
+ * send `cancellation_reoffer` (SMS_TEMPLATES #9) as the first text of a new cycle.
+ * It counts toward the lifetime cap and is held for quiet hours like any outreach
+ * text. When texting is not possible the outreach tick takes over with the reset
+ * cycle (minors and unsupported languages raise their own amber items there);
+ * when the lifetime cap is already used up, staff get an amber item to call.
+ */
+export async function afterAppointmentCancelled(d: SmsDeps, referralId: string): Promise<SendStatus | 'amber' | null> {
+  const q = d.db;
+  const ref = await repo.loadRef(q, referralId);
+  if (!ref || ref.state !== 'In Progress') return null;
+  const conv = await repo.getConv(q, referralId);
+  const settings = await repo.loadOutreachSettings(q);
+  if (conv.outreachCount >= settings.lifetimeCap) {
+    await raiseAmber(d, ref, 'ecw_cancelled', 'Appointment cancelled in eCW. Texting limit already reached — please call the patient.', true, SYSTEM_ACTOR);
+    return 'amber';
+  }
+  const lang = repo.langFromPatient(ref.language);
+  const minor = !!ref.dobIso && ageOn(ref.dobIso, d.now(), d.tz) < 18;
+  if (conv.paused || conv.numberSuppressed || conv.channelPreference !== 'sms' || ref.optedOut || !ref.consent
+    || !ref.phone || settings.textingPaused || !lang || minor) {
+    return null;
+  }
+  const now = d.now();
+  await repo.openSmsAttempt(q, referralId, now, 'Text sent: cancellation reoffer');
+  const status = await sendTemplate(d, ref, 'cancellation_reoffer', conv.lockedLanguage ?? lang, {}, { actor: AI_ACTOR });
+  if (status === 'suppressed' || status === 'failed') return status;
+  await repo.updateConv(q, referralId, {
+    cycleStep: 1, cycleStartedAt: now, lastOutreachAt: now, outreachCount: conv.outreachCount + 1,
+    repliedSinceOutreach: false, lockedLanguage: conv.lockedLanguage ?? lang,
+  });
+  return status;
 }
 
