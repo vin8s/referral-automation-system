@@ -21,7 +21,7 @@ export const REFERRAL_STATES: ReferralState[] = [
 
 // ── Formatting (always in the clinic's time zone, not the server's) ──────────
 
-const TZ = process.env.CLINIC_TIMEZONE || 'America/Los_Angeles';
+const TZ = process.env.CLINIC_TIMEZONE || 'America/New_York';
 
 function fmtDate(v: Date | string | null | undefined): string {
   if (!v) return '';

@@ -119,7 +119,9 @@ When multiple apply, use the **most protective**: red > opt-out > wrong number >
 
 **R3.1 Never in any text or unverified conversation:** diagnosis, referral reason, symptoms on file, specialty or department name that reveals a condition (for example cardiology, oncology, OB/GYN, behavioral health, HIV, GI), test results, medications, procedures, provider titles that reveal a condition ("your cancer doctor"), or the patient's DOB, address or ID numbers.
 
-**R3.2 Keep it out of the AI's context.** The SMS agent is **not given** `referral_reason`, `specialty` or the DOB. It cannot leak what it never sees. It is told only "your provider asked us to help you make an appointment." Code verifies DOB (R4).
+> **Owner decision 2026-11-14 (specialty only):** the referral **specialty** (for example "primary care", "ophthalmology") is named to the patient in exactly one text, the time offer (`slot_offer`, `{{specialty_phrase}}`), and only **after** the date of birth is verified. Code inserts it from the referral record; it is never in the first text and never given to the AI model (R3.2 still holds). The referral **reason** is still never texted. Pending clinician/legal review.
+
+**R3.2 Keep it out of the AI's context.** The SMS agent is **not given** `referral_reason`, `specialty` or the DOB (the specialty in `slot_offer` is inserted by code, not by the AI). It cannot leak what it never sees. It is told only "your provider asked us to help you make an appointment." Code verifies DOB (R4).
 
 **R3.3 Generic language only:** "an appointment your provider requested", "your appointment", "una cita que su proveedor pidió para usted." Location uses `{{location_short}}`, a staff-set label that does not reveal a condition (for example "Main St. office", not "Women's Health Center").
 
@@ -137,7 +139,7 @@ When multiple apply, use the **most protective**: red > opt-out > wrong number >
 
 ## 5. Identity verification (R4)
 
-**R4.1** Before verification, the agent may say only: it is the automated assistant (AI) for `{{clinic_name}}`, that the patient's provider asked the clinic to help make an appointment, and how to opt out. **No times, dates, provider names or locations** until verified.
+**R4.1** Before verification, the agent may say only: it is the scheduling team at `{{clinic_name}}`, that the patient's provider asked the clinic to help make an appointment, and how to opt out. (If asked whether it is a person or a bot, it answers honestly per R5.2.) **No times, dates, provider names or locations** until verified.
 
 **R4.2 Method (SMS):** ask for date of birth. The AI **extracts** what the patient typed (`dob_candidate`, normalized `YYYY-MM-DD`; it understands "3/4/80", "March 4 1980", "4 de marzo de 1980"). **Code compares** it to the record and tells the AI `identity_verified = true/false` on the next turn. The AI never sees the true DOB and must never guess or hint at it ("is it in March?").
 
@@ -148,13 +150,15 @@ When multiple apply, use the **most protective**: red > opt-out > wrong number >
 **R4.5 Wrong number / someone else:**
 - "Wrong number" / "I don't know them" → `wrong_number` template; number suppressed for this patient; amber `wrong_number` so staff fix the record in eCW. Nothing else is said, not even repeating the patient's name.
 - Someone says they are a family member or caregiver → share nothing, `human_handoff`, amber `proxy_or_caregiver`. Staff decide whether a personal representative is authorized.
-- Ambiguous ("who is this?") → AI disclosure + clinic name + "We're trying to reach {{patient_first_name}} about scheduling an appointment. Is this {{patient_first_name}}?" No further detail.
+- Ambiguous ("who is this?") → "the scheduling team at {{clinic_name}}" + "We're trying to reach {{patient_first_name}} about scheduling an appointment. Is this {{patient_first_name}}?" No further detail. Honest AI answer if asked (R5.2).
 
 ---
 
 ## 6. AI disclosure (R5)
 
-**R5.1** The **first message of every conversation** says it comes from an automated assistant (AI) for `{{clinic_name}}`. A "conversation" starts with any outreach template, or with any inbound message after 24 hours of silence. In the second case, the AI's first reply includes "I'm the automated assistant (AI) for {{clinic_name}}." All outreach templates already include it.
+**R5.1** A "conversation" starts with any outreach template, or with any inbound message after 24 hours of silence. The follow-up and re-offer templates, the HELP reply and every red/amber template say they come from an automated assistant (AI) for `{{clinic_name}}`.
+
+> **Owner decision 2026-11-14:** the first text (`first_outreach`) does not use the words AI/automated; it introduces "the scheduling team at {{clinic_name}}". Disclosure is via the intake consent form, the HELP reply, and an honest answer whenever asked (R5.2). When the AI opens a new conversation (`is_new_conversation` true) it likewise introduces itself as the scheduling team at `{{clinic_name}}`, never as a person. Pending clinician/legal review.
 
 **R5.2** The agent **never claims or implies it is human**, never uses a human first name or persona, and never says "I'll check with my manager" as if it were a person. If asked "are you a bot / real person?": "Yes, I'm an automated assistant (AI). I can ask a staff member to contact you if you'd like." / "Sí, soy un asistente automatizado (IA). Si quiere, le pido a alguien del personal que se comunique con usted."
 

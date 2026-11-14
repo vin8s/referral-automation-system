@@ -76,7 +76,12 @@ export function templateText(id: TemplateId, lang: Lang): string {
 
 export type TemplateVars = Partial<Record<
   'patient_first_name' | 'clinic_name' | 'clinic_phone' | 'slot_label' | 'slot_1' | 'slot_2' | 'slot_3'
-  | 'appointment_date_time' | 'location_short', string>>;
+  | 'appointment_date_time' | 'location_short'
+  /**
+   * slot_offer only: " for your primary care appointment" / " para su cita de …", or "".
+   * Filled by code (src/server/sms/specialty.ts) after identity is verified; never by the model.
+   */
+  | 'specialty_phrase', string>>;
 
 /** Fills {{vars}}. Missing slot lines (e.g. only 2 slots offered) are dropped. */
 export function renderTemplate(id: TemplateId, lang: Lang, vars: TemplateVars): { text: string } & SegmentInfo {

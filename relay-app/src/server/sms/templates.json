@@ -14,7 +14,8 @@
         "slot_2": "Wed, Jun 4 at 2:30 PM",
         "slot_3": "Thu, Jun 5 at 9:00 AM",
         "appointment_date_time": "Tue, Jun 3 at 10:00 AM",
-        "location_short": "Main St. office"
+        "location_short": "Main St. office",
+        "specialty_phrase": " for your primary care appointment"
       },
       "es": {
         "clinic_name": "Community Health Clinic",
@@ -25,28 +26,29 @@
         "slot_2": "miércoles 4 de junio, 2:30 p. m.",
         "slot_3": "jueves 5 de junio, 9:00 a. m.",
         "appointment_date_time": "martes 3 de junio, 10:00 a. m.",
-        "location_short": "oficina de Main St."
+        "location_short": "oficina de Main St.",
+        "specialty_phrase": " para su cita de medicina general"
       }
     },
-    "notes": "filled_length/segments are for the message with the sample values filled in. Code must re-measure the final string before sending. es_gsm_variant (where present) is a reworded Spanish version that stays in GSM-7; whether to use it is a clinic decision (see SMS_TEMPLATES.md)."
+    "notes": "filled_length/segments are for the message with the sample values filled in. Code must re-measure the final string before sending. es_gsm_variant (where present) is a reworded Spanish version that stays in GSM-7; whether to use it is a clinic decision (see SMS_TEMPLATES.md). specialty_phrase (slot_offer only) is filled by code from the referral specialty, after identity is verified; empty when no specialty is set (then slot_offer is 178 chars EN / 235 chars ES GSM-7 variant)."
   },
   "templates": [
     {
       "id": "first_outreach",
-      "purpose": "First message of a new outreach thread: AI disclosure + identity check. No details about the referral.",
+      "purpose": "First message of a new outreach thread: identity check only. No details about the referral (no specialty, no reason). Owner decision 2026-11-14: no \"AI\"/\"automated\" wording here; disclosure is via the intake consent form, the HELP reply and an honest answer whenever asked.",
       "trigger": "Referral moves Queued -> In Progress (day 0)",
       "quiet_hours": "Never sent in quiet hours; queued to next allowed window",
       "counts_toward_cap": true,
       "requires_identity_verified": false,
       "en": {
-        "text": "Hi {{patient_first_name}}, this is the automated scheduling assistant (AI) for {{clinic_name}}. Your provider asked us to help you make an appointment. To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.",
-        "filled_length": 245,
+        "text": "Hi {{patient_first_name}}, this is the scheduling team at {{clinic_name}}. Your provider asked us to help you make an appointment. To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.",
+        "filled_length": 224,
         "encoding": "GSM-7",
         "segments": 2
       },
       "es": {
-        "text": "Hola {{patient_first_name}}, le escribe el asistente automatizado de citas (IA) de {{clinic_name}}. Su proveedor quiere que le ayudemos a hacer una cita. Para proteger su privacidad, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para dejar de recibir mensajes.",
-        "filled_length": 273,
+        "text": "Hola {{patient_first_name}}, le escribe el equipo de citas de {{clinic_name}}. Su proveedor quiere que le ayudemos a hacer una cita. Para proteger su privacidad, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 252,
         "encoding": "GSM-7",
         "segments": 2
       }
@@ -142,20 +144,20 @@
     },
     {
       "id": "slot_offer",
-      "purpose": "Reference shape for offering times after identity is verified. The AI normally writes this turn; code may use it as a fallback.",
+      "purpose": "Offers times after identity is verified. {{specialty_phrase}} names the referral specialty (\" for your primary care appointment\"); it is inserted by code only after the date of birth is verified and is empty when no specialty is set. This is the only text that names the specialty; the referral reason is never texted. The AI normally writes this turn; code may use it as a fallback.",
       "trigger": "Identity verified",
       "quiet_hours": "Reply held to next allowed window",
       "counts_toward_cap": false,
       "requires_identity_verified": true,
       "en": {
-        "text": "Thanks, {{patient_first_name}}. Which time works? Reply 1, 2 or 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\nNone work? Tell us what days and times are best.",
-        "filled_length": 178,
+        "text": "Thanks, {{patient_first_name}}. Which time works{{specialty_phrase}}? Reply 1, 2 or 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\nNone work? Tell us what days and times are best.",
+        "filled_length": 212,
         "encoding": "GSM-7",
         "segments": 2
       },
       "es": {
-        "text": "Gracias, {{patient_first_name}}. ¿Qué horario le queda mejor? Responda 1, 2 o 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Díganos qué días y horas le quedan mejor.",
-        "filled_length": 231,
+        "text": "Gracias, {{patient_first_name}}. ¿Qué horario le queda mejor{{specialty_phrase}}? Responda 1, 2 o 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Díganos qué días y horas le quedan mejor.",
+        "filled_length": 264,
         "encoding": "UCS-2",
         "segments": 4,
         "non_gsm_chars": [
@@ -163,8 +165,8 @@
         ]
       },
       "es_gsm_variant": {
-        "text": "Gracias, {{patient_first_name}}. Responda 1, 2 o 3 con el horario que le quede mejor:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Cuéntenos qué fechas y horas le quedan mejor.",
-        "filled_length": 240,
+        "text": "Gracias, {{patient_first_name}}. ¿Qué horario le queda mejor{{specialty_phrase}}? Responda 1, 2 o 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Cuéntenos qué fechas y horas le quedan mejor.",
+        "filled_length": 268,
         "encoding": "GSM-7",
         "segments": 2
       }

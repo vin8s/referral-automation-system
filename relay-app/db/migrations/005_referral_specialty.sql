@@ -1,0 +1,11 @@
+-- Relay — referral specialty (2026-11-14).
+--
+-- The specialty of the appointment being scheduled (e.g. "Primary care",
+-- "Ophthalmology"). Staff set it at ingest or on the referral. The texting
+-- assistant names it ONLY in the time-offer text (slot_offer), after the patient
+-- has verified their date of birth, and it is inserted by code: it is never given
+-- to the AI model and never appears in the first text. `reason` (clinical detail)
+-- is still never texted.
+--
+-- Safe for existing databases: adds one nullable column, no data changes.
+alter table referrals add column if not exists specialty text;

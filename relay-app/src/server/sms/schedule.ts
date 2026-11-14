@@ -29,7 +29,7 @@ export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
 };
 
 export function clinicTimeZone(): string {
-  return process.env.CLINIC_TIMEZONE || 'America/Los_Angeles';
+  return process.env.CLINIC_TIMEZONE || 'America/New_York';
 }
 
 const WD: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };

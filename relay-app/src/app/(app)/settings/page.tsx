@@ -85,11 +85,11 @@ function PracticeSettings() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 12 }}>
         <div>
           <div style={{ fontSize: 11, color: 'var(--relay-ink-3)' }}>Name</div>
-          <FakeInput value="Bay Cardiology Group" w={220} />
+          <FakeInput value="Rhode Island Free Clinic" w={220} />
         </div>
         <div>
           <div style={{ fontSize: 11, color: 'var(--relay-ink-3)' }}>Specialty</div>
-          <FakeInput value="Cardiology" w={220} />
+          <FakeInput value="Primary care (free clinic)" w={220} />
         </div>
         <div>
           <div style={{ fontSize: 11, color: 'var(--relay-ink-3)' }}>Locations</div>

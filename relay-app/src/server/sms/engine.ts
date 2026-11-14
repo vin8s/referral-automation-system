@@ -22,6 +22,7 @@ import * as repo from './repo';
 import { AI_ACTOR, SYSTEM_ACTOR, type AuditActor, type Conv, type RefCtx } from './repo';
 import { ageOn, isWithinSendWindow, localDate, nextSendWindow, zonedParts, type OutreachSettings } from './schedule';
 import { buildOfferedSlots } from './slots';
+import { specialtyPhrase } from './specialty';
 import { IMMEDIATE_TEMPLATES, renderTemplate, type Lang, type TemplateId, type TemplateVars } from './templates';
 import type { HistoryTurn, OfferedSlot, RedCode, SmsTurnOutput, TurnContext } from './types';
 
@@ -176,7 +177,22 @@ export async function sendTemplate(
   d: SmsDeps, ref: RefCtx, id: TemplateId, lang: Lang, extra: TemplateVars = {},
   opts: Partial<SendOptions> = {},
 ): Promise<SendStatus> {
-  const { text } = renderTemplate(id, lang, { ...baseVars(d, ref), ...extra });
+  const vars: TemplateVars = { ...baseVars(d, ref), ...extra };
+  if (id === 'slot_offer') {
+    // The only text that names the specialty, and only after the DOB is verified
+    // (owner decision 2026-11-14). Callers already check this; re-check here so no
+    // path can ever offer times (or the specialty) to an unverified number.
+    const conv = await repo.findConv(d.db, ref.id);
+    if (!conv?.identityVerified) {
+      logError('slot_offer blocked', new Error(`slot_offer requested for ${ref.id} before identity verification`));
+      await repo.audit(d.db, SYSTEM_ACTOR, ref.id, 'sms.blocked', 'Time offer blocked: identity not verified');
+      return 'suppressed';
+    }
+    vars.specialty_phrase = specialtyPhrase(ref.specialty, lang);
+  } else {
+    delete vars.specialty_phrase;
+  }
+  const { text } = renderTemplate(id, lang, vars);
   return sendSms(d, ref, { body: text, author: 'template', templateKey: id, immediate: IMMEDIATE_TEMPLATES.has(id), ...opts });
 }
 
@@ -522,7 +538,7 @@ async function sendModelTemplate(d: SmsDeps, ref: RefCtx, conv: Conv, template: 
 
 async function sendAiReply(d: SmsDeps, ref: RefCtx, conv: Conv, text: string, st: TurnState) {
   const problems = validateOutgoing(text, {
-    clinicPhone: d.clinicPhone, dobIso: ref.dobIso, sensitiveText: `${ref.reason} ${d.specialty}`,
+    clinicPhone: d.clinicPhone, dobIso: ref.dobIso, sensitiveText: `${ref.reason} ${ref.specialty} ${d.specialty}`,
     offeredSlots: conv.offeredSlots, identityVerified: conv.identityVerified,
   });
   if (problems.length) {

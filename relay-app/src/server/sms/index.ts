@@ -22,10 +22,10 @@ import { OUTREACH_STEPS } from './templates';
 export { SmsActionError };
 
 export function clinicDisplayName(): string {
-  return process.env.CLINIC_DISPLAY_NAME || 'Community Health Clinic';
+  return process.env.CLINIC_DISPLAY_NAME || 'Rhode Island Free Clinic';
 }
 export function clinicPhoneNumber(): string {
-  return process.env.CLINIC_PHONE_NUMBER || '(555) 555-0123';
+  return process.env.CLINIC_PHONE_NUMBER || '(401) 274-6347';
 }
 
 export async function smsDeps(): Promise<SmsDeps> {

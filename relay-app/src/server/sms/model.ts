@@ -106,8 +106,8 @@ export class MockSmsAgentModel implements SmsAgentModel {
     if (/\bwho is this\b|\bquien (es|habla)\b/.test(t)) {
       out.intent = 'who_is_this';
       out.reply_text = es
-        ? `Soy el asistente automatizado (IA) de ${input.clinicName}. Queremos hablar con ${input.patientFirstName} sobre una cita. ¿Es usted ${input.patientFirstName}?`
-        : `I'm the automated assistant (AI) for ${input.clinicName}. We're trying to reach ${input.patientFirstName} about scheduling an appointment. Is this ${input.patientFirstName}?`;
+        ? `Le escribe el equipo de citas de ${input.clinicName}. Queremos hablar con ${input.patientFirstName} sobre una cita. ¿Es usted ${input.patientFirstName}?`
+        : `This is the scheduling team at ${input.clinicName}. We're trying to reach ${input.patientFirstName} about scheduling an appointment. Is this ${input.patientFirstName}?`;
       return out;
     }
     if (/\b(in|en) (spanish|espanol)\b/.test(t)) { out.language_switch_request = 'es'; out.language = 'es'; }

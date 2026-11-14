@@ -29,7 +29,10 @@ export interface RefCtx {
   id: string;
   state: string;
   priority: string;
+  /** Clinical detail. NEVER texted and NEVER sent to the model (outbound guard only). */
   reason: string;
+  /** Appointment specialty. Texted only in slot_offer after identity is verified; never sent to the model. */
+  specialty: string;
   referringProvider: string;
   location: string;
   patientId: string;
@@ -48,14 +51,15 @@ export interface RefCtx {
 }
 
 const REF_SQL = `
-  select r.id, r.state, r.priority, coalesce(r.reason,'') as reason, coalesce(r.referring_provider,'') as referring_provider,
+  select r.id, r.state, r.priority, coalesce(r.reason,'') as reason, coalesce(r.specialty,'') as specialty,
+         coalesce(r.referring_provider,'') as referring_provider,
          r.location, r.patient_id, r.escalation_reason,
          p.name, to_char(p.date_of_birth, 'YYYY-MM-DD') as dob, coalesce(p.phone,'') as phone, p.language,
          p.sms_consent, p.sms_consent_at, p.sms_consent_source, p.sms_opted_out, p.sms_opted_out_at, p.sms_opt_out_source
     from referrals r join patients p on p.id = r.patient_id`;
 
 type RefRow = {
-  id: string; state: string; priority: string; reason: string; referring_provider: string; location: string;
+  id: string; state: string; priority: string; reason: string; specialty: string; referring_provider: string; location: string;
   patient_id: string; escalation_reason: string | null; name: string; dob: string | null; phone: string; language: string;
   sms_consent: boolean; sms_consent_at: Date | null; sms_consent_source: string | null;
   sms_opted_out: boolean; sms_opted_out_at: Date | null; sms_opt_out_source: string | null;
@@ -63,7 +67,7 @@ type RefRow = {
 
 function toRef(r: RefRow): RefCtx {
   return {
-    id: r.id, state: r.state, priority: r.priority, reason: r.reason, referringProvider: r.referring_provider,
+    id: r.id, state: r.state, priority: r.priority, reason: r.reason, specialty: r.specialty, referringProvider: r.referring_provider,
     location: r.location, patientId: r.patient_id, patientName: r.name, firstName: r.name.split(/\s+/)[0] ?? r.name,
     dobIso: r.dob, phone: r.phone, language: r.language, consent: r.sms_consent, consentAt: r.sms_consent_at,
     consentSource: r.sms_consent_source, optedOut: r.sms_opted_out, optedOutAt: r.sms_opted_out_at,
