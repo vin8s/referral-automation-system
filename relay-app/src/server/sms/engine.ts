@@ -311,10 +311,12 @@ export async function handleInbound(d: SmsDeps, input: InboundInput): Promise<In
   let out: SmsTurnOutput | null = null;
   let modelError: string | null = null;
   try {
-    const raw = await d.model.turn({
-      clinicName: d.clinicName, patientFirstName: ref.firstName, history, patientMessage: input.body, context,
-    });
-    const v = validateModelOutput(raw);
+    const turnInput = { clinicName: d.clinicName, patientFirstName: ref.firstName, history, patientMessage: input.body, context };
+    let v = validateModelOutput(await d.model.turn(turnInput));
+    if (!v.ok) {
+      // One correction attempt (e.g. reply_text over 300 characters). Every check still applies after.
+      v = validateModelOutput(await d.model.turn({ ...turnInput, correction: v.errors.slice(0, 5).join(', ') }));
+    }
     if (v.ok) out = v.output;
     else modelError = `invalid model output: ${v.errors.slice(0, 5).join(', ')}`;
   } catch (err) {

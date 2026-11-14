@@ -101,4 +101,6 @@ export interface ModelInput {
   history: HistoryTurn[];
   patientMessage: string;
   context: TurnContext;
+  /** Set by code on a second attempt: what was wrong with the previous sms_turn output. */
+  correction?: string;
 }

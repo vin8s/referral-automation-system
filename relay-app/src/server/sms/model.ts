@@ -196,6 +196,12 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
     for (const h of input.history) push(h.role, h.role === 'user' ? sanitizePatientText(h.text) : h.text);
     push('user', sanitizePatientText(input.patientMessage) || '(empty message)');
     messages[messages.length - 1].content.push({ text: `<turn_context>${JSON.stringify(input.context)}</turn_context>` });
+    if (input.correction) {
+      // Written by code, never by the patient: what was wrong with the previous attempt.
+      messages[messages.length - 1].content.push({
+        text: `Your previous sms_turn output was rejected: ${input.correction}. Call sms_turn again with a corrected output. reply_text must be 300 characters or less.`,
+      });
+    }
 
     const system = [{ text: buildSystemPrompt(input) }, { text: TURN_CONTEXT_NOTE }];
 

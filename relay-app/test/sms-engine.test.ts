@@ -285,6 +285,28 @@ describe('fail-safes', () => {
     expect(await openAmber(db, ref)).toContain('agent_error');
   });
 
+  it('an invalid first answer gets one correction attempt that names the problem', async () => {
+    const long = 'x'.repeat(320);
+    const h = harness(db, input => input.correction
+      ? turn({ reply_text: 'Sorry, could you send that again?', intent: 'other' })
+      : turn({ reply_text: long, intent: 'other' }));
+    await runOutreachTick(h.deps);
+    await say(h, 'hello?');
+    const model = h.deps.model as unknown as { calls: { correction?: string }[] };
+    expect(model.calls).toHaveLength(2);
+    expect(model.calls[1].correction).toContain('reply_text too long');
+    expect(await openAmber(db, ref)).not.toContain('agent_error');
+  });
+
+  it('still fails safe when the correction attempt is also invalid', async () => {
+    const h = harness(db, () => turn({ reply_text: 'y'.repeat(320) }));
+    await runOutreachTick(h.deps);
+    await say(h, 'hello?');
+    expect((h.deps.model as unknown as { calls: unknown[] }).calls).toHaveLength(2);
+    expect(await templates()).toEqual(['first_outreach']);
+    expect(await openAmber(db, ref)).toContain('agent_error');
+  });
+
   it('a captured slot that was never offered → agent_error, no capture', async () => {
     const h = harness(db);
     await runOutreachTick(h.deps);
