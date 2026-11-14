@@ -31,6 +31,14 @@ export class ApiError extends Error {
   }
 }
 
+/** Signed out or session expired: go to the login screen (saying why), then come back here. */
+async function goToLogin(res: Response): Promise<void> {
+  const data = await res.clone().json().catch(() => ({}));
+  const params = new URLSearchParams({ next: window.location.pathname + window.location.search });
+  if (data?.code === 'session_expired') params.set('reason', data.reason === 'absolute' ? 'absolute' : 'idle');
+  window.location.assign(`/login?${params.toString()}`);
+}
+
 async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: init?.method ?? 'GET',
@@ -39,9 +47,7 @@ async function api<T>(path: string, init?: { method?: string; body?: unknown }):
     body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   if (res.status === 401 && typeof window !== 'undefined') {
-    // Session expired: go back to the login screen, then return here.
-    const next = window.location.pathname + window.location.search;
-    window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+    await goToLogin(res);
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -337,7 +343,7 @@ export async function uploadScheduleFile(file: File): Promise<EcwImportDraft> {
   form.append('file', file);
   const res = await fetch('/api/schedule-import', { method: 'POST', body: form, cache: 'no-store' });
   if (res.status === 401 && typeof window !== 'undefined') {
-    window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+    await goToLogin(res);
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

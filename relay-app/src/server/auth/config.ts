@@ -20,7 +20,7 @@ export function authMode(): AuthMode {
   if (explicit === 'cognito') return 'cognito';
   if (explicit === 'mock' || !cognitoConfigured()) {
     if (isProd()) {
-      throw new Error('Auth misconfigured: mock login is disabled in production. Set COGNITO_ISSUER, COGNITO_CLIENT_ID, COGNITO_CLIENT_SECRET and AUTH_SECRET.');
+      throw new Error('Auth misconfigured: mock login is disabled in production. Set COGNITO_ISSUER, COGNITO_CLIENT_ID, COGNITO_CLIENT_SECRET, COGNITO_DOMAIN and AUTH_SECRET.');
     }
     return 'mock';
   }
@@ -48,5 +48,19 @@ export function appUrl(): string {
 
 export const SESSION_COOKIE = 'relay_session';
 export const OIDC_COOKIE = 'relay_oidc';
-export const SESSION_HOURS = Number(process.env.SESSION_HOURS || 8);
+
+function positiveNumber(raw: string | undefined, fallback: number, max: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, max) : fallback;
+}
+
+/** Absolute limit: a sign-in never lasts longer than this, however active (one shift). Default 8 h. */
+export const SESSION_HOURS = positiveNumber(process.env.SESSION_HOURS, 8, 24);
+/** Idle limit: signed out after this many minutes without activity. Default 30 min. */
+export const SESSION_IDLE_MINUTES = positiveNumber(process.env.SESSION_IDLE_MINUTES, 30, SESSION_HOURS * 60);
 export const secureCookies = () => isProd();
+
+/** Clinic name shown on the sign-in screen. */
+export function clinicLoginName(): string {
+  return process.env.CLINIC_LOGIN_NAME?.trim() || 'Clinica Esperanza / Hope Clinic';
+}

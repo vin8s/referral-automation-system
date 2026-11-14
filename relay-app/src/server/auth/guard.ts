@@ -5,7 +5,7 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { SESSION_COOKIE, verifySession } from './session';
+import { SESSION_COOKIE, checkSession, verifySession } from './session';
 import { logError } from '../log';
 import type { Role, SessionUser } from '@/lib/auth-types';
 
@@ -16,9 +16,10 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
 /** For Server Components / layouts: redirect to /login when signed out. */
 export async function requireUser(): Promise<SessionUser> {
-  const user = await getSessionUser();
-  if (!user) redirect('/login');
-  return user;
+  const store = await cookies();
+  const check = await checkSession(store.get(SESSION_COOKIE)?.value);
+  if (check.status === 'valid') return check.user;
+  redirect(check.status === 'expired' ? `/login?reason=${check.reason}` : '/login');
 }
 
 export function jsonError(status: number, error: string): Response {
@@ -41,7 +42,7 @@ export function withAuth<Ctx>(
       logError(`auth ${opts.name ?? new URL(req.url).pathname}`, err);
       return jsonError(500, 'Authentication is misconfigured on the server.');
     }
-    if (!user) return jsonError(401, 'Not signed in.');
+    if (!user) return Response.json({ error: 'Not signed in.', code: 'unauthenticated' }, { status: 401 });
     if (opts.roles && !opts.roles.includes(user.role)) {
       return jsonError(403, 'You do not have permission to do this.');
     }

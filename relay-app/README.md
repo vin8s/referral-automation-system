@@ -44,6 +44,36 @@ src/app/(app)/layout.tsx         re-checks the session, renders the shell
 Rules: no patient data in `console.*`; fake data only until the BAA is signed;
 roles are `ma` and `admin` (settings changes are admin-only).
 
+## Staff login
+
+Production uses **Amazon Cognito managed login** (Cognito's hosted, Relay-branded pages);
+development uses a mock user picker. Managing accounts: [`docs/STAFF_LOGINS.md`](../docs/STAFF_LOGINS.md).
+
+```
+/login (Relay landing: states + "Sign in")
+  └─ GET /api/auth/login?next=&lang=   PKCE verifier + state + nonce → signed HttpOnly cookie (15 min, path /api/auth)
+       └─ Cognito /oauth2/authorize (prompt=login, lang=es optional)
+            password · forced new password · authenticator-app setup · MFA code · forgot password
+       └─ GET /api/auth/callback        ?error= → /login?error=…; else code exchange, verify ID token,
+                                        groups → role (none → Cognito logout → /login?error=no_role)
+            └─ relay_session cookie    HS256 JWT {sub,name,email,role,ats}; exp = min(now+idle, ats+absolute)
+POST /api/auth/logout                  clears cookies → Cognito /logout → /login?signed_out=1
+src/proxy.ts                           valid → re-sign on activity (pages / API writes, ≥60 s apart);
+                                       expired → /login?reason=idle|absolute or 401 {code:'session_expired'}
+```
+
+| File | Role |
+|---|---|
+| `src/server/auth/config.ts` | `authMode()` (mock impossible in production), `SESSION_IDLE_MINUTES` (30), `SESSION_HOURS` (8) |
+| `src/server/auth/session.ts` | sign / check / renew the session cookie (idle vs absolute expiry) |
+| `src/server/auth/cognito.ts` | discovery, authorize URL, code exchange, group → role, logout URL |
+| `src/server/auth/redirect.ts` | `safeNext()`: open-redirect-safe `next` |
+| `src/server/auth/errors.ts` | Cognito / openid-client errors → login-page states |
+| `src/app/login/` | landing page + English/Spanish copy |
+
+The registered sign-out URLs (`<APP_URL>/login?signed_out=1`, `<APP_URL>/login?error=no_role`) must
+match `LOGOUT_RETURN_PATHS` exactly; `infra/` registers both. Tests: `test/auth.test.ts`.
+
 ## SMS texting (pilot channel)
 
 An AI texts the patient, verifies identity by date of birth (checked by code, never by the
