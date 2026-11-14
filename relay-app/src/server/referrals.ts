@@ -49,10 +49,17 @@ function isoToMdy(iso: string | null): string {
   return `${m}/${d}/${y}`;
 }
 
-/** "MM/DD/YYYY" → "YYYY-MM-DD" (null if not parseable). */
-function mdyToIso(mdy: string | undefined): string | null {
+/**
+ * "MM/DD/YYYY" → "YYYY-MM-DD", or null unless it is a real calendar date
+ * (so "13/45/1980" can't crash the ::date cast and fail a whole import).
+ */
+export function mdyToIso(mdy: string | undefined): string | null {
   const m = mdy?.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
+  if (!m) return null;
+  const [mo, d, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (y < 1900 || dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
 }
 
 /** Referrals in 'In Progress' with at least one attempt display as 'Attempted' (REFERRAL_STATUSES.md). */
@@ -491,13 +498,33 @@ export interface ReferralDraft {
   insurance?: string; reason?: string; referringProvider?: string; priority?: string;
 }
 
+const DRAFT_KEYS = ['patientName', 'dateOfBirth', 'phone', 'language', 'insurance', 'reason', 'referringProvider', 'priority'] as const;
+
+/** Keeps only known draft fields that are strings, trimmed and length-capped (input from the browser). */
+export function sanitizeDraft(raw: unknown): ReferralDraft {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: ReferralDraft = {};
+  for (const k of DRAFT_KEYS) {
+    const v = r[k];
+    if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, k === 'reason' ? 1000 : 200);
+  }
+  return out;
+}
+
+const phoneDigits = (p: string | null | undefined) => (p ?? '').replace(/\D/g, '').slice(-10);
+
 export async function updateReferral(
-  referralId: string, draft: ReferralDraft, comment: string | undefined, actor: Actor,
+  referralId: string, rawDraft: ReferralDraft, rawComment: string | undefined, actor: Actor,
 ): Promise<Result> {
+  const draft = sanitizeDraft(rawDraft);
+  const comment = typeof rawComment === 'string' ? rawComment.slice(0, 1000) : undefined;
   const db = await getDb();
   return db.transaction(async tx => {
-    const { rows } = await tx.query<{ patient_id: string }>('select patient_id from referrals where id = $1', [referralId]);
+    const { rows } = await tx.query<{ patient_id: string; phone: string | null; dob: string | null }>(
+      `select r.patient_id, p.phone, to_char(p.date_of_birth, 'YYYY-MM-DD') as dob
+         from referrals r join patients p on p.id = r.patient_id where r.id = $1`, [referralId]);
     if (rows.length === 0) return { success: false };
+    const before = rows[0];
     const priority = draft.priority === 'urgent' || draft.priority === 'normal' ? draft.priority : null;
 
     await tx.query(
@@ -517,12 +544,29 @@ export async function updateReferral(
     if (draft.phone)             lines.push(`Phone → ${draft.phone}`);
     if (draft.language)          lines.push(`Language → ${draft.language}`);
     if (draft.insurance)         lines.push(`Insurance → ${draft.insurance}`);
-    if (draft.dateOfBirth)       lines.push(`DOB → ${draft.dateOfBirth}`);
+    if (mdyToIso(draft.dateOfBirth)) lines.push(`DOB → ${draft.dateOfBirth}`);
     if (draft.reason)            lines.push(`Reason → ${draft.reason}`);
     if (draft.referringProvider) lines.push(`Provider → ${draft.referringProvider}`);
     if (priority)                lines.push(`Priority → ${priority}`);
     if (comment?.trim())         lines.push(`Comment: ${comment.trim()}`);
     if (lines.length) await audit(tx, actor, referralId, 'referral.edit', `Manual edit — ${lines.join(' · ')}`);
+
+    // A new phone number (or corrected DOB) means whoever answers next has NOT proven who they
+    // are: a text identity check done by the old number's holder must not carry over (R4.2/R4.4).
+    const newDob = mdyToIso(draft.dateOfBirth);
+    const phoneChanged = !!draft.phone && phoneDigits(draft.phone) !== phoneDigits(before.phone);
+    const dobChanged = !!newDob && newDob !== before.dob;
+    if (phoneChanged || dobChanged) {
+      const { rows: reset } = await tx.query<{ referral_id: string }>(
+        `update sms_conversations set identity_verified = false, identity_verified_at = null, identity_attempts = 0,
+                updated_at = now()
+          where referral_id in (select id from referrals where patient_id = $1) and identity_verified
+          returning referral_id`, [before.patient_id]);
+      for (const r of reset) {
+        await audit(tx, actor, r.referral_id, 'sms.identity_reset',
+          `${phoneChanged ? 'Phone number' : 'Date of birth'} changed — patient must confirm date of birth again by text`);
+      }
+    }
     return { success: true };
   });
 }
@@ -541,6 +585,20 @@ export interface IngestRow {
   smsConsentSource?: string;
 }
 
+/** Coerces one ingest row from the browser: strings only, trimmed and length-capped; consent only if exactly true. */
+export function sanitizeIngestRow(raw: unknown): IngestRow {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const s = (k: string, max = 200) => (typeof r[k] === 'string' ? (r[k] as string).trim().slice(0, max) : '');
+  const opt = (k: string, max = 200) => s(k, max) || undefined;
+  return {
+    patientName: s('patientName'), phone: s('phone', 40), dateOfBirth: opt('dateOfBirth', 20),
+    sex: r.sex === 'F' ? 'F' : r.sex === 'M' ? 'M' : '', language: opt('language', 40), insurance: opt('insurance'),
+    reason: opt('reason', 1000), referringProvider: opt('referringProvider'),
+    priority: r.priority === 'urgent' ? 'urgent' : 'normal', location: opt('location'),
+    smsConsent: r.smsConsent === true, smsConsentSource: opt('smsConsentSource', 120),
+  };
+}
+
 export async function ingestReferrals(
   rows: IngestRow[], actor: Actor, via: 'upload' | 'manual' = 'upload',
 ): Promise<{ success: boolean; importedCount: number; consentedCount: number }> {
@@ -551,8 +609,9 @@ export async function ingestReferrals(
     let next = Math.max(maxRows[0]?.max ?? 0, 1042) + 1;
     let importedCount = 0;
     let consentedCount = 0;
-    for (const row of rows) {
-      if (!row.patientName?.trim() || !row.phone?.trim()) continue;
+    for (const raw of rows) {
+      const row = sanitizeIngestRow(raw);
+      if (!row.patientName || !row.phone) continue;
       const consent = row.smsConsent === true;
       const consentSource = consent
         ? `${(row.smsConsentSource?.trim() || 'referral intake').slice(0, 80)} (recorded by ${actor.name})`

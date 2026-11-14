@@ -150,9 +150,8 @@ export async function updateSmsPreferences(
 
 /** Patient simulator (SMS_PROVIDER=mock only): the text arrives exactly like a real inbound SMS. */
 export async function simulatePatientText(referralId: string, body: string, user: SessionUser) {
-  if (smsProviderName() !== 'mock' || process.env.NODE_ENV === 'production') {
-    throw new SmsActionError(404, 'The patient simulator is only available with SMS_PROVIDER=mock (never in production).');
-  }
+  if (process.env.NODE_ENV === 'production') throw new SmsActionError(404, 'The patient simulator is not available in production.');
+  if (smsProviderName() !== 'mock') throw new SmsActionError(404, 'The patient simulator is only available with SMS_PROVIDER=mock.');
   const text = body.trim().slice(0, 1000);
   if (!text) throw new SmsActionError(400, 'Message is empty.');
   const d = await smsDeps();

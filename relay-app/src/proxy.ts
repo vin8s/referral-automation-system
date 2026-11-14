@@ -9,6 +9,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import {
   SESSION_COOKIE, checkSession, sessionCookieOptions, shouldRenew, signSession, type SessionCheck,
 } from '@/server/auth/session';
+import { isCrossSiteWrite } from '@/server/auth/csrf';
 
 // Public paths authenticate themselves:
 //   /api/sms/inbound        — SNS signature + topic check (AWS End User Messaging inbound SMS)
@@ -28,6 +29,11 @@ function isActivity(request: NextRequest): boolean {
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  // CSRF: a browser write from another site is refused before anything else, public paths
+  // included (e.g. a forged logout / mock-login). Webhooks send no Origin and pass through.
+  if (pathname.startsWith('/api/') && isCrossSiteWrite(request.method, request.headers)) {
+    return NextResponse.json({ error: 'Cross-site request refused.', code: 'cross_site' }, { status: 403 });
+  }
   if (PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p))) return NextResponse.next();
 
   let check: SessionCheck;
