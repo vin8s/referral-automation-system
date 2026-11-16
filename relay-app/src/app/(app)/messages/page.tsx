@@ -379,7 +379,7 @@ export default function MessagesPage() {
         </table>
         {filtered.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--relay-ink-3)', fontSize: 13 }}>
-            No entries match the current filter.
+            {log.length === 0 ? 'No outreach or referral activity yet.' : 'No entries match the current filter.'}
           </div>
         )}
       </div>

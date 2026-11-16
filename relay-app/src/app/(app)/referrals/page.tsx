@@ -440,7 +440,9 @@ export default function ReferralsPage() {
       }}>
         <ReferralTable rows={filtered} showStatePicker onStateChange={handleStateChange} sort={sort} onSort={onSort} />
         {filtered.length === 0 && (
-          <EmptyState title="No referrals match" sub="Try clearing filters or adjust the search." />
+          referrals.length === 0
+            ? <EmptyState icon="list" title="No referrals yet" sub="Add referrals on the Ingest screen to start outreach." />
+            : <EmptyState title="No referrals match" sub="Try clearing filters or adjust the search." />
         )}
       </div>
 

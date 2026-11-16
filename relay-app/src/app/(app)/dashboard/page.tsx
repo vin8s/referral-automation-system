@@ -7,6 +7,7 @@ import { outcomeLabel } from '@/lib/format';
 import { PageHead } from '@/components/layout/PageHead';
 import { StatePill } from '@/components/shared/StatePill';
 import { Icon } from '@/components/shared/Icon';
+import { EmptyState } from '@/components/shared/EmptyState';
 import { ActionQueueList } from '@/components/screens/dashboard/ActionQueueList';
 import { useSession } from '@/contexts/SessionContext';
 import { ScheduleFreshnessBanner } from '@/components/shared/ScheduleFreshnessBanner';
@@ -140,11 +141,13 @@ export default function DashboardPage() {
   const [queue, setQueue]                   = useState<ConfirmQueue>({ escalations: [], needsHuman: [], slots: [] });
   const [referrals, setReferrals]           = useState<Referral[]>([]);
   const [selectedReferral, setSelectedReferral] = useState<Referral | null>(null);
+  const [loaded, setLoaded]                 = useState(false);
 
   const fetchAll = useCallback(() => {
     Promise.all([getConfirmQueue(), getReferrals()]).then(([q, r]) => {
       setQueue(q);
       setReferrals(r);
+      setLoaded(true);
     });
   }, []);
 
@@ -201,7 +204,14 @@ export default function DashboardPage() {
               <button className="btn btn-sm btn-ghost">View all <Icon name="arrow" size={11} /></button>
             </Link>
           </div>
-          <RecentReferralsTable rows={referrals.slice(0, 8)} onRowClick={setSelectedReferral} />
+          {loaded && referrals.length === 0 ? (
+            <EmptyState
+              icon="list" title="No referrals yet"
+              sub="Add referrals on the Ingest screen. They will show up here as soon as they are imported."
+            />
+          ) : (
+            <RecentReferralsTable rows={referrals.slice(0, 8)} onRowClick={setSelectedReferral} />
+          )}
         </div>
       </div>
 
