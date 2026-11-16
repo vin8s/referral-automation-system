@@ -23,6 +23,7 @@ import * as repo from './repo';
 import { AI_ACTOR, SYSTEM_ACTOR, type AuditActor, type Conv, type RefCtx } from './repo';
 import { ageOn, isWithinSendWindow, localDate, nextSendWindow, zonedParts, type OutreachSettings } from './schedule';
 import { buildOfferedSlots, buildOpenSlotPool } from './slots';
+import { epicOpenSlots, pickSpread } from './epicSlots';
 import { specialtyPhrase } from './specialty';
 import { IMMEDIATE_TEMPLATES, renderTemplate, type Lang, type TemplateId, type TemplateVars } from './templates';
 import type { HistoryTurn, ModelInput, OfferedSlot, RedCode, SmsTurnOutput, TurnContext } from './types';
@@ -151,17 +152,22 @@ function identityStillValid(conv: Conv, now: Date): boolean {
     && now.getTime() - conv.identityVerifiedAt.getTime() <= REVERIFY_AFTER_DAYS * 86400_000;
 }
 
-async function freshSlots(d: SmsDeps, q: Queryable, conv: Conv): Promise<OfferedSlot[]> {
+async function freshSlots(d: SmsDeps, q: Queryable, conv: Conv, ref: RefCtx): Promise<OfferedSlot[]> {
   const taken = takenSlotKeys(await repo.takenSlots(q));
+  // Epic sandbox prototype: real open times from Epic $find when "Book into Epic (sandbox)" is on.
+  const epic = await epicOpenSlots(q, ref.id, { now: d.now(), tz: d.tz, excludeKeys: new Set(conv.rejectedSlotKeys), takenKeys: taken });
+  if (epic) return pickSpread(epic, 3);
   return buildOfferedSlots({
     now: d.now(), tz: d.tz, takenKeys: taken, excludeKeys: new Set(conv.rejectedSlotKeys), providers: d.providers,
   });
 }
 
 /** Other free times (next 10 weekdays) the AI may suggest when the offered ones don't work. */
-async function openSlotPool(d: SmsDeps, q: Queryable, conv: Conv): Promise<OfferedSlot[]> {
+async function openSlotPool(d: SmsDeps, q: Queryable, conv: Conv, ref: RefCtx): Promise<OfferedSlot[]> {
   const taken = takenSlotKeys(await repo.takenSlots(q));
   const offered = new Set(conv.offeredSlots.map(s => s.slot_id));
+  const epic = await epicOpenSlots(q, ref.id, { now: d.now(), tz: d.tz, excludeKeys: new Set(conv.rejectedSlotKeys), takenKeys: taken });
+  if (epic) return epic.filter(s => !offered.has(s.slot_id));
   return buildOpenSlotPool({
     now: d.now(), tz: d.tz, takenKeys: taken, excludeKeys: new Set(conv.rejectedSlotKeys), providers: d.providers,
   }).filter(s => !offered.has(s.slot_id));
@@ -535,12 +541,12 @@ async function processInbound(d: SmsDeps, input: InboundInput, ref: RefCtx, msgI
 
   // Slots are only offered once identity is verified.
   if (conv.identityVerified && conv.offeredSlots.length === 0 && !safetyOnly) {
-    conv.offeredSlots = await freshSlots(d, q, conv);
+    conv.offeredSlots = await freshSlots(d, q, conv, ref);
     await repo.updateConv(q, ref.id, { offeredSlots: conv.offeredSlots });
   }
 
   // 6. Model turn
-  const pool = conv.identityVerified && !safetyOnly ? await openSlotPool(d, q, conv) : [];
+  const pool = conv.identityVerified && !safetyOnly ? await openSlotPool(d, q, conv, ref) : [];
   const context = await buildTurnContext(d, ref, conv, isNewConversation, aiToday, pool);
   const history = await buildHistory(d, ref.id, msgId);
   let out: SmsTurnOutput | null = null;
@@ -801,7 +807,7 @@ async function identityStep(d: SmsDeps, ref: RefCtx, conv: Conv, candidate: stri
     return { referralId: ref.id, outcome: 'amber identity_failed (no DOB on file)' };
   }
   if (dobMatches(candidate, ref.dobIso, d.now())) {
-    const slots = await freshSlots(d, q, conv);
+    const slots = await freshSlots(d, q, conv, ref);
     await repo.updateConv(q, ref.id, {
       identityVerified: true, identityVerifiedAt: d.now(), identityAttempts: 0, offeredSlots: slots,
     });
@@ -842,7 +848,7 @@ async function captureStep(d: SmsDeps, ref: RefCtx, conv: Conv, slotId: string, 
   }
   // A slot taken by someone else since it was offered must not be double-captured.
   if (takenSlotKeys(await repo.takenSlots(q)).has(slotKey(slot.day, slot.time)) && conv.capturedSlotId !== slotId) {
-    const slots = await freshSlots(d, q, conv);
+    const slots = await freshSlots(d, q, conv, ref);
     await repo.updateConv(q, ref.id, { offeredSlots: slots });
     if (slots.length >= 2) await sendTemplate(d, ref, 'slot_offer', lang, slotVars(slots, lang));
     else await raiseAmber(d, ref, 'no_slot_works', 'The picked time was taken and no other open times are left to offer by text.', true);
@@ -899,7 +905,7 @@ export async function afterSlotRejected(d: SmsDeps, referralId: string, rejected
   conv.rejectedSlotKeys = rejectedKeys;
   await repo.updateConv(d.db, referralId, { rejectedSlotKeys: rejectedKeys, capturedSlotId: null });
   if (!identityStillValid(conv, d.now()) || conv.paused || conv.channelPreference !== 'sms') return null;
-  const slots = await freshSlots(d, d.db, conv);
+  const slots = await freshSlots(d, d.db, conv, ref);
   await repo.updateConv(d.db, referralId, { offeredSlots: slots });
   await repo.audit(d.db, SYSTEM_ACTOR, referralId, 'sms.reoffer', 'Captured slot rejected by MA — new times offered by text');
   if (slots.length < 2) {

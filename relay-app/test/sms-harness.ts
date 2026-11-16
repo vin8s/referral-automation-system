@@ -62,6 +62,7 @@ export async function testDb(): Promise<Db> {
   await db.query(`truncate audit_log, appointments, call_attempts, messages, sms_conversations, needs_human_items,
     sms_inbound_events, referrals, patients cascade`);
   await db.query(`update sms_settings set texting_paused = false, approval_required = false`);
+  await db.query(`update epic_settings set booking_enabled = false, patients = '[]'::jsonb, last_sync_at = null, last_sync_result = null`);
   return db;
 }
 

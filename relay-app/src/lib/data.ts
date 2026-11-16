@@ -105,8 +105,18 @@ export async function getConfirmQueue(): Promise<ConfirmQueue> {
 }
 
 /** MA confirms an AI-captured slot they have booked in the practice system. */
-export async function confirmSlot(referralId: string): Promise<{ success: boolean }> {
-  return mutate(`${ref(referralId)}/confirm`, 'POST');
+export interface ConfirmSlotResult {
+  success: boolean;
+  /** Set when the slot was booked in the Epic sandbox (prototype). */
+  epic?: { appointmentId: string };
+  /** Message for the MA when it failed (e.g. the Epic slot was taken). */
+  error?: string;
+  errorMsg?: string;
+  code?: 'slot_unavailable' | 'epic_error';
+}
+
+export async function confirmSlot(referralId: string): Promise<ConfirmSlotResult> {
+  return mutate<ConfirmSlotResult>(`${ref(referralId)}/confirm`, 'POST');
 }
 
 export async function rejectSlot(referralId: string): Promise<{ success: boolean }> {

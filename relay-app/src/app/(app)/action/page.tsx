@@ -119,11 +119,13 @@ function EscalationCard({ item, onClaim, onResolved }: {
 
 function ConfirmCard({ item, onConfirm, onReject }: {
   item: ConfirmQueueItem;
-  onConfirm: (id: string) => Promise<void>;
+  /** Resolves to an error message to show on the card, or null when the card can leave the queue. */
+  onConfirm: (id: string) => Promise<string | null>;
   onReject: (id: string) => Promise<void>;
 }) {
   const [showThread, setShowThread] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const excerpt = item.smsExcerpt ?? [];
 
   return (
@@ -169,8 +171,18 @@ function ConfirmCard({ item, onConfirm, onReject }: {
       </div>
 
       <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button className="btn btn-primary" disabled={busy} onClick={async () => { setBusy(true); await onConfirm(item.referralId); }}>
-          <Icon name="check" size={13} /> Confirm — booked in practice system
+        <button
+          className="btn btn-primary" disabled={busy}
+          title={item.epicBooking ? 'Prototype: books this time in the Epic sandbox, then adds it to Relay\'s Calendar' : undefined}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            const err = await onConfirm(item.referralId);
+            if (err) { setError(err); setBusy(false); }
+          }}
+        >
+          <Icon name="check" size={13} />{' '}
+          {busy && item.epicBooking ? 'Booking in Epic…' : item.epicBooking ? 'Confirm — book in Epic (sandbox)' : 'Confirm — booked in practice system'}
         </button>
         <button className="btn btn-danger" disabled={busy} onClick={async () => { setBusy(true); await onReject(item.referralId); }}>
           <Icon name="x" size={13} /> Reject (re-outreach)
@@ -178,6 +190,7 @@ function ConfirmCard({ item, onConfirm, onReject }: {
         <Link href={`/referrals/${item.referralId}`}>
           <button className="btn"><Icon name="edit" size={13} /> View referral</button>
         </Link>
+        {item.epicBooking && <span className="tag" title="Epic sandbox prototype: synthetic data only">Epic sandbox · prototype</span>}
         <span style={{ flex: 1 }} />
         <button className="collapse-toggle" onClick={() => setShowThread(s => !s)}>
           <Icon name="sms" size={12} />
@@ -185,6 +198,12 @@ function ConfirmCard({ item, onConfirm, onReject }: {
           <Icon name="chevron" size={11} />
         </button>
       </div>
+
+      {error && (
+        <div role="alert" style={{ marginTop: 10, fontSize: 12.5, color: 'var(--relay-urgent-700)', background: 'var(--relay-urgent-50)', border: '1px solid var(--relay-urgent-200)', borderRadius: 8, padding: '8px 12px' }}>
+          {error}
+        </div>
+      )}
 
       {showThread && (
         <div style={{ marginTop: 14 }}>
@@ -242,9 +261,15 @@ export default function ActionPage() {
     load();
   }
 
-  async function handleConfirm(referralId: string) {
-    await confirmSlot(referralId);
-    setQueue(q => ({ ...q, slots: q.slots.filter(i => i.referralId !== referralId) }));
+  async function handleConfirm(referralId: string): Promise<string | null> {
+    const res = await confirmSlot(referralId);
+    // Epic sandbox prototype: a taken slot was released and new times are offered by text, so the card leaves.
+    if (res.success || res.code === 'slot_unavailable') {
+      setQueue(q => ({ ...q, slots: q.slots.filter(i => i.referralId !== referralId) }));
+      if (res.code === 'slot_unavailable') window.alert(res.error ?? 'That time is no longer open in Epic. New times will be offered by text.');
+      return null;
+    }
+    return res.error ?? res.errorMsg ?? 'Could not confirm this slot. Try again.';
   }
 
   async function handleReject(referralId: string) {

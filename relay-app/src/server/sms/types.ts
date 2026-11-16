@@ -70,6 +70,8 @@ export interface OfferedSlot {
   /** Relay appointment fields ("Tue Nov 17", "10:00 AM"). Not sent to the model. */
   day: string;
   time: string;
+  /** Epic sandbox prototype: the $find reference needed to $book this slot. Not sent to the model. */
+  epic_slot_ref?: string;
 }
 
 /** The turn context JSON (SMS_AGENT_PROMPT.md §3). Contains no DOB / reason / specialty. */

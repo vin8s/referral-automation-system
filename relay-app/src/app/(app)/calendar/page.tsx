@@ -182,7 +182,7 @@ function ApptChip({ event, compact, onClick, highlighted }: {
       )}
       {!event.isShadow && !compact && (
         <div style={{ fontSize: 10, opacity: 0.65, marginTop: 1 }}>
-          {event.provider} · {event.time}
+          {event.provider} · {event.time}{event.bookedInEpic ? ' · Epic' : ''}
         </div>
       )}
     </div>
@@ -317,8 +317,13 @@ function EventModal({
                 padding: '5px 11px', borderRadius: 6, fontSize: 12, fontWeight: 500,
                 marginBottom: 14,
               }}>
-                <Icon name="check" size={12} /> Confirmed · mirrored to shadow calendar
+                <Icon name="check" size={12} /> {event.bookedInEpic ? 'Confirmed · booked in Epic sandbox (prototype)' : 'Confirmed · mirrored to shadow calendar'}
               </div>
+              {event.bookedInEpic && (
+                <div style={{ fontSize: 12, color: 'var(--relay-ink-3)', marginBottom: 12, lineHeight: 1.5 }}>
+                  Edits or deletes here change Relay only. Epic has no cancel by API, so change the appointment in Epic too.
+                </div>
+              )}
               {!event.isShadow && (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn btn-sm" style={{ flex: 1 }} onClick={() => setEditMode(true)}>

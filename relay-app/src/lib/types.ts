@@ -57,6 +57,8 @@ export interface CapturedSlot {
   time: string;
   provider: string;
   capturedAgoMin: number | null;
+  /** Epic sandbox prototype: this time came from Epic $find. */
+  epic?: boolean;
 }
 
 export interface BookedAppointment {
@@ -66,6 +68,8 @@ export interface BookedAppointment {
   confirmedBy: string;
   confirmedAt: string;
   mirrorStatus: 'mirrored' | 'pending' | 'failed';
+  /** Epic sandbox prototype: the appointment Relay booked in Epic. */
+  epicAppointmentId?: string;
 }
 
 export interface Patient {
@@ -122,6 +126,8 @@ export interface ConfirmQueueItem {
   summary: string;
   /** Last few SMS messages of the thread. */
   smsExcerpt?: SmsMessage[];
+  /** Epic sandbox prototype: Confirm will book this slot in Epic ($book). */
+  epicBooking?: boolean;
 }
 
 /** Red Escalated referral (safety). Never merged with amber NeedsHumanItem. */
@@ -169,6 +175,8 @@ export interface CalendarEvent {
   state: ReferralState;
   mirrorStatus: 'mirrored' | 'pending' | 'failed';
   isShadow: boolean;
+  /** Epic sandbox prototype: booked in Epic by Relay after the MA confirmed. */
+  bookedInEpic?: boolean;
 }
 
 export interface PipelineCount {

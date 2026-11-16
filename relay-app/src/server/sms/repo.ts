@@ -405,8 +405,8 @@ export async function suppressHeldTexts(q: Queryable, referralId: string, why: s
 export async function captureSlot(q: Queryable, referralId: string, slot: OfferedSlot, now: Date): Promise<void> {
   await q.query(`update appointments set status = 'expired' where referral_id = $1 and status = 'captured'`, [referralId]);
   await q.query(
-    `insert into appointments (referral_id, status, day, time, provider, captured_at, mirror_status)
-     values ($1, 'captured', $2, $3, $4, $5, 'pending')`, [referralId, slot.day, slot.time, slot.provider, now]);
+    `insert into appointments (referral_id, status, day, time, provider, captured_at, mirror_status, epic_slot_ref)
+     values ($1, 'captured', $2, $3, $4, $5, 'pending', $6)`, [referralId, slot.day, slot.time, slot.provider, now, slot.epic_slot_ref ?? null]);
 }
 
 export async function confirmedAppointment(q: Queryable, referralId: string): Promise<{ day: string; time: string; provider: string } | null> {
