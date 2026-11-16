@@ -9,7 +9,8 @@ This is a **multi-screen operational web app prototype** ("Relay"), built fronte
 These prevent the most expensive mistakes. They override any instinct to "build the obvious next thing."
 
 - **Connector mode only.** The MA confirms bookings; the platform surfaces AI-captured slots, call records, and analytics. **Do NOT build native mode**: no AI-writes-to-calendar, no native approval queue, no bidirectional sync. If a screen would imply native mode, render it as a clearly-labeled disabled/"v2" placeholder.
-- **The shadow calendar is a read-only mirror.** The Calendar screen displays confirmed bookings. It does not create or edit appointments.
+- **Exception — native booking: sandbox prototype only (owner decision 2026-11-16).** Behind the admin setting **"Book into Epic (sandbox)"** (off by default), when the MA clicks **Confirm** on a captured slot, Relay books that slot in the **Epic FHIR sandbox** (`Appointment.$find` / `$book`) and records the appointment on Relay's Calendar. Rules: a human (the MA) approves every booking — the AI never books on its own; Epic **sandbox only** with synthetic data, never a real clinic or real patient data; with the setting off, Relay behaves exactly as connector mode. Epic patients enter Relay only via the manual **"Sync from Epic"** button from an admin-configured list of sandbox patient IDs (simulated referral feed). See `docs/EPIC_PROTOTYPE_PLAN.md`.
+- **The shadow calendar is a read-only mirror.** The Calendar screen displays confirmed bookings. It does not create or edit appointments on its own (the sandbox exception above adds an entry only as the result of an MA-confirmed Epic booking).
 - **When unsure if something is in scope**, the in/out table in PRODUCT_SPEC.md §2 is the authority — not your judgment, not this file.
 
 ## Backend: not in this phase, but it is coming — build the seam for it
