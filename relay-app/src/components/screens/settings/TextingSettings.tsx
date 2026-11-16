@@ -11,12 +11,12 @@ import type { OutreachSettings, OutreachSettingsView } from '@/lib/types';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-const inputStyle: React.CSSProperties = {
+export const inputStyle: React.CSSProperties = {
   background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)', borderRadius: 6,
   padding: '5px 9px', font: 'inherit', fontSize: 13, color: 'var(--relay-ink)', outline: 'none',
 };
 
-function Row({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
+export function Row({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, padding: '14px 0', borderBottom: '1px solid var(--relay-hairline)' }}>
       <div style={{ flex: 1 }}>

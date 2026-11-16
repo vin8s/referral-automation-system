@@ -86,21 +86,26 @@ export async function getEpicSettingsView(): Promise<EpicSettingsView> {
 
 const FHIR_ID = /^[A-Za-z0-9\-.]{1,64}$/;
 
+/** Invalid settings input (route handlers answer 400 with the message). */
+export class EpicSettingsError extends Error {
+  constructor(message: string) { super(message); this.name = 'EpicSettingsError'; }
+}
+
 /** Validates and saves the admin-editable part (booking toggle + patient list). */
 export async function saveEpicSettings(
   input: { bookingEnabled: boolean; patients: EpicFeedPatient[] },
   actorName: string,
 ): Promise<EpicSettings> {
-  if (typeof input.bookingEnabled !== 'boolean') throw new Error('bookingEnabled must be true or false.');
-  if (!Array.isArray(input.patients) || input.patients.length > 50) throw new Error('Provide up to 50 Epic patients.');
+  if (typeof input.bookingEnabled !== 'boolean') throw new EpicSettingsError('bookingEnabled must be true or false.');
+  if (!Array.isArray(input.patients) || input.patients.length > 50) throw new EpicSettingsError('Provide up to 50 Epic patients.');
   const seen = new Set<string>();
   const patients = input.patients.map(p => {
     const fhirId = String(p?.fhirId ?? '').trim();
-    if (!FHIR_ID.test(fhirId)) throw new Error(`"${fhirId}" is not a valid Epic patient FHIR ID.`);
-    if (seen.has(fhirId)) throw new Error(`Patient ${fhirId} is listed twice.`);
+    if (!FHIR_ID.test(fhirId)) throw new EpicSettingsError(`"${fhirId}" is not a valid Epic patient FHIR ID.`);
+    if (seen.has(fhirId)) throw new EpicSettingsError(`Patient ${fhirId} is listed twice.`);
     seen.add(fhirId);
     const visitType = String(p?.visitType ?? DEFAULT_EPIC_VISIT_TYPE).trim() || DEFAULT_EPIC_VISIT_TYPE;
-    if (!/^[A-Za-z0-9\-.]{1,32}$/.test(visitType)) throw new Error(`"${visitType}" is not a valid visit-type code.`);
+    if (!/^[A-Za-z0-9\-.]{1,32}$/.test(visitType)) throw new EpicSettingsError(`"${visitType}" is not a valid visit-type code.`);
     const specialty = p?.specialty ? String(p.specialty).trim().slice(0, 80) : null;
     return { fhirId, visitType, specialty };
   });

@@ -654,18 +654,28 @@ export async function updateReferral(
     const phoneChanged = !!draft.phone && phoneDigits(draft.phone) !== phoneDigits(before.phone);
     const dobChanged = !!newDob && newDob !== before.dob;
     if (phoneChanged || dobChanged) {
-      const { rows: reset } = await tx.query<{ referral_id: string }>(
-        `update sms_conversations set identity_verified = false, identity_verified_at = null, identity_attempts = 0,
-                updated_at = now()
-          where referral_id in (select id from referrals where patient_id = $1) and identity_verified
-          returning referral_id`, [before.patient_id]);
-      for (const r of reset) {
-        await audit(tx, actor, r.referral_id, 'sms.identity_reset',
-          `${phoneChanged ? 'Phone number' : 'Date of birth'} changed — patient must confirm date of birth again by text`);
-      }
+      await resetTextIdentity(tx, before.patient_id, phoneChanged ? 'Phone number' : 'Date of birth', actor);
     }
     return { success: true };
   });
+}
+
+/**
+ * A patient's phone or date of birth changed: any text identity check already passed for their
+ * referrals no longer counts (R4.2/R4.4). Used by staff edits and by Epic sync.
+ */
+export async function resetTextIdentity(
+  q: Queryable, patientId: string, what: 'Phone number' | 'Date of birth', actor: Actor,
+): Promise<void> {
+  const { rows: reset } = await q.query<{ referral_id: string }>(
+    `update sms_conversations set identity_verified = false, identity_verified_at = null, identity_attempts = 0,
+            updated_at = now()
+      where referral_id in (select id from referrals where patient_id = $1) and identity_verified
+      returning referral_id`, [patientId]);
+  for (const r of reset) {
+    await audit(q, actor, r.referral_id, 'sms.identity_reset',
+      `${what} changed — patient must confirm date of birth again by text`);
+  }
 }
 
 export interface IngestRow {
@@ -698,14 +708,41 @@ export function sanitizeIngestRow(raw: unknown): IngestRow {
   };
 }
 
+/** Next free REF-#### number. Call inside the creating transaction. */
+export async function nextReferralNumber(q: Queryable): Promise<number> {
+  const { rows } = await q.query<{ max: number | null }>(
+    `select max(substring(id from 5)::int) as max from referrals where id ~ '^REF-[0-9]+$'`);
+  return Math.max(rows[0]?.max ?? 0, 1042) + 1;
+}
+
+/**
+ * Inserts one new referral (state Queued) for an existing patient and audit-logs it. The single
+ * creation path for spreadsheet/manual ingest and Epic sync, so every new referral starts the same
+ * way: Queued and not yet approved for outreach (pilot mode lists it under "Ready to text").
+ * `row` must already be sanitized (`sanitizeIngestRow`). Never texts anyone: the outreach
+ * scheduler does that, under its own rules.
+ */
+export async function insertNewReferral(
+  q: Queryable,
+  input: { id: string; patientId: string; row: IngestRow; source: string; auditWhat: string },
+  actor: Actor,
+): Promise<string> {
+  const { id, patientId, row, source, auditWhat } = input;
+  await q.query(
+    `insert into referrals (id, patient_id, reason, referring_provider, referral_source, location, priority, state, specialty)
+     values ($1, $2, $3, $4, $5, $6, $7, 'Queued', $8)`,
+    [id, patientId, row.reason ?? '', row.referringProvider ?? '', source, row.location || 'Providence',
+      row.priority === 'urgent' ? 'urgent' : 'normal', row.specialty || null]);
+  await audit(q, actor, id, 'referral.ingest', auditWhat);
+  return id;
+}
+
 export async function ingestReferrals(
   rows: IngestRow[], actor: Actor, via: 'upload' | 'manual' = 'upload',
 ): Promise<{ success: boolean; importedCount: number; consentedCount: number }> {
   const db = await getDb();
   return db.transaction(async tx => {
-    const { rows: maxRows } = await tx.query<{ max: number | null }>(
-      `select max(substring(id from 5)::int) as max from referrals where id ~ '^REF-[0-9]+$'`);
-    let next = Math.max(maxRows[0]?.max ?? 0, 1042) + 1;
+    let next = await nextReferralNumber(tx);
     let importedCount = 0;
     let consentedCount = 0;
     for (const raw of rows) {
@@ -721,16 +758,12 @@ export async function ingestReferrals(
          values ($1, $2, $3, $4, $5, $6::date, $7::boolean, case when $7::boolean then now() end, $8) returning id`,
         [row.patientName.trim(), row.phone.trim(), row.language || 'English', row.insurance ?? '',
           row.sex === 'F' ? 'F' : 'M', mdyToIso(row.dateOfBirth), consent, consentSource]);
-      const referralId = `REF-${next++}`;
-      await tx.query(
-        `insert into referrals (id, patient_id, reason, referring_provider, referral_source, location, priority, state, specialty)
-         values ($1, $2, $3, $4, $5, $6, $7, 'Queued', $8)`,
-        [referralId, pt[0].id, row.reason ?? '', row.referringProvider ?? '',
-          via === 'manual' ? 'Manual entry' : 'Uploaded batch', row.location || 'Providence',
-          row.priority === 'urgent' ? 'urgent' : 'normal', row.specialty || null]);
-      await audit(tx, actor, referralId, 'referral.ingest',
-        `${via === 'manual' ? 'Entered manually' : 'Ingested via spreadsheet upload'} · ` +
-        (consent ? `SMS consent recorded (${consentSource})` : 'SMS consent not recorded'));
+      await insertNewReferral(tx, {
+        id: `REF-${next++}`, patientId: pt[0].id, row,
+        source: via === 'manual' ? 'Manual entry' : 'Uploaded batch',
+        auditWhat: `${via === 'manual' ? 'Entered manually' : 'Ingested via spreadsheet upload'} · ` +
+          (consent ? `SMS consent recorded (${consentSource})` : 'SMS consent not recorded'),
+      }, actor);
       importedCount++;
       if (consent) consentedCount++;
     }
