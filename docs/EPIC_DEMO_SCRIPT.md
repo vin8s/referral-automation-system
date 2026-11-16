@@ -184,8 +184,8 @@ Relay books the slot in Epic first (`$book`). Only after Epic accepts does Relay
 
 ### 3.8 Show the result
 - **Referral:** Camila's referral is now **Booked**.
-- **Calendar:** open **Calendar**. The page opens on a fixed prototype week (April 2026), so type
-  "Camila" in **Find patient or date…** and pick the result to jump to the appointment. The event
+- **Calendar:** open **Calendar**. It opens on the current week; if the booking is in a later week, use the
+  week arrows or type "Camila" in **Find patient or date…** to jump to it. The event
   line reads `<provider> · <time> · Epic`. Open it to see
   **Confirmed · booked in Epic sandbox (prototype)** and the note that edits here change Relay only.
 - **Texts:** the patient received the booking confirmation.
@@ -260,7 +260,7 @@ the booking into the EHR. Today that's Epic's sandbox with test data."*
 | **No texts go out** | Outside the sending window (Mon–Sat 8–8 clinic time), **or** pilot mode is on and the referral wasn't approved in **Ready to text**, **or** **Pause all texting** is on, **or** texting is paused on that referral. | Check the time; approve on the **Dashboard**; check **Settings → Texting** for **Resume texting**; check the referral's **Text messages** card. |
 | Real texts: nothing arrives | The patient's phone isn't your verified number, or the phone-test tunnel expired. | Re-check the phone on the referral (step 3.4); rerun `scripts/phone-test/phone-test.sh up`. |
 | Card says **Confirm — booked in practice system** (no Epic tag) | **Book into Epic (sandbox)** is Off, or the time didn't come from Epic. | Turn it On before the patient is offered times. A slot captured while it was Off books in Relay only. |
-| Booked appointment not visible on the Calendar | The Calendar opens on April 2026 and the week grid shows 8 am–5 pm rows. | Use **Find patient or date…** to jump to it. |
+| Booked appointment not visible on the Calendar | It's in a later week, or outside the week grid's 8 am–5 pm rows. | Use the week arrows or **Find patient or date…** to jump to it. |
 
 ---
 
