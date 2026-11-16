@@ -11,7 +11,7 @@ import type { Queryable } from '../db';
 import { getEhrConnector, getEpicSettings } from '../ehr';
 import type { EhrPatient, EhrSlot } from '../ehr/types';
 import { dayKeyOf, slotKey } from '@/lib/slots';
-import { zonedParts } from './schedule';
+import { zonedParts, zonedTimeToUtc } from './schedule';
 import type { OfferedSlot } from './types';
 
 const DAY_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -60,6 +60,12 @@ export function epicSlotToOffered(s: EhrSlot, tz: string): OfferedSlot {
   };
 }
 
+function startOfTomorrow(now: Date, tz: string): Date {
+  const p = zonedParts(now, tz);
+  const t = new Date(Date.UTC(p.year, p.month - 1, p.day + 1));
+  return zonedTimeToUtc(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), 0, 0, tz);
+}
+
 async function epicPatientIdFor(q: Queryable, referralId: string): Promise<string | null> {
   const { rows } = await q.query<{ epic_patient_id: string | null }>(
     `select p.epic_patient_id from referrals r join patients p on p.id = r.patient_id where r.id = $1`, [referralId]);
@@ -83,8 +89,9 @@ export async function epicOpenSlots(
     let found: EhrSlot[];
     try {
       patient = await ehr.getPatient(epicId);
-      const from = new Date(opts.now.getTime() + 60 * 60_000);
-      const to = new Date(opts.now.getTime() + SEARCH_DAYS * 86400_000);
+      // Like the built-in grid: offer times starting tomorrow (clinic time), never later today.
+      const from = startOfTomorrow(opts.now, opts.tz);
+      const to = new Date(from.getTime() + SEARCH_DAYS * 86400_000);
       found = await ehr.findSlots({
         patient, from: from.toISOString().slice(0, 19) + 'Z', to: to.toISOString().slice(0, 19) + 'Z', visitType: feed?.visitType ?? '95014',
       });
@@ -93,7 +100,8 @@ export async function epicOpenSlots(
       console.error('[epic] $find failed for referral', referralId, err instanceof Error ? err.message : err);
       return [];
     }
-    all = { at: opts.now.getTime(), slots: found.filter(s => new Date(s.start) > opts.now).map(s => epicSlotToOffered(s, opts.tz)) };
+    const earliest = startOfTomorrow(opts.now, opts.tz);
+    all = { at: opts.now.getTime(), slots: found.filter(s => new Date(s.start) >= earliest).map(s => epicSlotToOffered(s, opts.tz)) };
     cache.set(referralId, all);
   }
   return all.slots.filter(s => !opts.excludeKeys.has(slotKey(s.day, s.time)) && !opts.takenKeys.has(slotKey(s.day, s.time)));
