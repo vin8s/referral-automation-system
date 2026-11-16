@@ -17,8 +17,8 @@ export const POST = withAuth(async (req, _ctx, user) => {
     smsConsentSource: typeof r?.smsConsentSource === 'string' ? r.smsConsentSource : undefined,
   }));
   const result = await ingestReferrals(rows, user, body.via === 'manual' ? 'manual' : 'upload');
-  // New referrals with SMS consent get their first text right away (within quiet hours);
-  // the outreach tick applies every consent, cadence and quiet-hour rule.
-  if (result.consentedCount > 0) after(() => runOutreachSoon('referral import'));
+  // New referrals get their first text right away (within quiet hours); recorded consent is not
+  // required (owner decision 2026-11-14). The outreach tick applies opt-out, cadence and quiet-hour rules.
+  if (result.importedCount > 0) after(() => runOutreachSoon('referral import'));
   return Response.json(result);
 });

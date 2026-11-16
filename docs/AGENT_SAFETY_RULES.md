@@ -166,7 +166,7 @@ When multiple apply, use the **most protective**: red > opt-out > wrong number >
 
 ## 7. Consent and opt-out (R6)
 
-**R6.1** Only text patients with **SMS consent = Yes** recorded (see `docs/clinic/PATIENT_CONSENT.md`). No consent → no texts; staff call instead.
+**R6.1** ~~Only text patients with **SMS consent = Yes** recorded.~~ **Owner decision 2026-11-14:** recorded SMS consent is **not** required before texting; Relay texts every eligible patient. Consent is still recorded when staff enter it (see `docs/clinic/PATIENT_CONSENT.md`). Opt-out (R6.2–R6.6), minors (R7.4), quiet hours and caps still apply. **Open risk:** the toll-free registration states patients opt in on the intake form, and the TCPA generally requires prior consent for automated texts; confirm with counsel before texting real patients (§12).
 
 **R6.2 Keywords (code, exact match):** the whole message, trimmed, case-insensitive, punctuation and accents ignored.
 

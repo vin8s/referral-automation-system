@@ -11,7 +11,7 @@ export const AMBER_CODES = [
   'off_topic_repeated',
 ] as const;
 /** Amber codes raised by code, not by the model. */
-export const CODE_AMBER_CODES = ['agent_error', 'cadence_exhausted', 'urgent_referral', 'opted_back_in'] as const;
+export const CODE_AMBER_CODES = ['agent_error', 'cadence_exhausted', 'urgent_referral', 'opted_back_in', 'patient_replied_paused'] as const;
 
 export type RedCode = typeof RED_CODES[number];
 export type AmberCode = typeof AMBER_CODES[number] | typeof CODE_AMBER_CODES[number];

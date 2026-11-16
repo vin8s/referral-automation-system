@@ -19,7 +19,7 @@ export type TemplateId =
   | 'help_reply' | 'wrong_number' | 'identity_not_verified' | 'emergency_reply' | 'crisis_reply'
   | 'human_handoff'
   // Code-local lines that are not in docs/sms-templates.json (see CODE_TEMPLATES below).
-  | 'identity_retry' | 'red_followup_emergency' | 'red_followup_crisis' | 'language_barrier';
+  | 'identity_retry' | 'identity_ask' | 'red_followup_emergency' | 'red_followup_crisis' | 'language_barrier';
 
 interface TemplateDoc {
   id: string;
@@ -34,10 +34,15 @@ const DOC = (raw as unknown as { templates: TemplateDoc[] }).templates;
  * Short fixed lines the safety rules describe but the template file doesn't
  * contain. DRAFT wording, same clinician-approval requirement as the JSON file.
  *   identity_retry          R4.3: first DOB mismatch, ask again without hints.
+ *   identity_ask            Safe fallback before identity is verified when the AI reply is blocked by the outbound guard.
  *   red_followup_*          R1.2.5: one short supportive line when a patient keeps texting after red.
  *   language_barrier        R8.3: short bilingual handoff.
  */
 const CODE_TEMPLATES: Record<string, Record<Lang, string>> = {
+  identity_ask: {
+    en: 'To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.',
+    es: 'Para proteger su privacidad, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para no recibir mensajes.',
+  },
   identity_retry: {
     en: 'Sorry, we could not match that. Please check and reply with your date of birth again (MM/DD/YYYY).',
     es: 'Lo sentimos, no pudimos confirmar ese dato. Por favor revise y responda otra vez con su fecha de nacimiento (MM/DD/AAAA).',
@@ -92,6 +97,14 @@ export function renderTemplate(id: TemplateId, lang: Lang, vars: TemplateVars): 
     return !m || !!vars[m[1] as keyof TemplateVars];
   }).join('\n');
   if (!vars.slot_3) text = text.replace('Reply 1, 2 or 3', 'Reply 1 or 2').replace('Responda 1, 2 o 3', 'Responda 1 o 2');
-  text = text.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => vars[k as keyof TemplateVars] ?? '');
+  const fill = (k: string) => {
+    const v = vars[k as keyof TemplateVars] ?? '';
+    // Inserted Spanish specialty names: drop the accents that are not in GSM-7 (á í ó ú) so one word
+    // can't turn the whole text into UCS-2 (sim: "cardiología" made slot_offer 4 segments).
+    return lang === 'es' && k === 'specialty_phrase' ? v.replace(/[áíóú]/g, c => ({ á: 'a', í: 'i', ó: 'o', ú: 'u' })[c]!) : v;
+  };
+  text = text.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => fill(k));
+  // "10:30 a. m." + "." in the template → "a. m.."
+  text = text.replace(/(a|p)\. m\.\./g, '$1. m.');
   return { text, ...measureSms(text) };
 }

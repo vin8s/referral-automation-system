@@ -1,6 +1,7 @@
 // Timing rules for texting (AGENT_SAFETY_RULES R7). Pure functions; `now` is always passed in.
 
 import 'server-only';
+import { allowedNumbers } from './allowlist';
 
 export interface OutreachSettings {
   textingPaused: boolean;
@@ -31,8 +32,25 @@ export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
   aiDailyCap: 15,
 };
 
+const DEFAULT_TZ = 'America/New_York';
+let warnedTz: string | null = null;
+
+/**
+ * CLINIC_TIMEZONE, or America/New_York. A typo ("America/NewYork", "EST5") used to make
+ * Intl throw a RangeError on every inbound turn and every outreach tick.
+ */
 export function clinicTimeZone(): string {
-  return process.env.CLINIC_TIMEZONE || 'America/New_York';
+  const tz = process.env.CLINIC_TIMEZONE || DEFAULT_TZ;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    if (warnedTz !== tz) {
+      warnedTz = tz;
+      console.error(`[relay] CLINIC_TIMEZONE is not a valid IANA time zone; using ${DEFAULT_TZ}`);
+    }
+    return DEFAULT_TZ;
+  }
 }
 
 const WD: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -75,9 +93,19 @@ function isAllowedDay(p: ZonedParts, s: OutreachSettings): boolean {
 
 /** True when unsolicited / non-urgent texts may go out (8am–8pm Mon–Sat local, not holidays). */
 export function isWithinSendWindow(now: Date, s: OutreachSettings, tz = clinicTimeZone()): boolean {
+  if (testAnyTime()) return true;
   const p = zonedParts(now, tz);
   const mins = p.hour * 60 + p.minute;
   return isAllowedDay(p, s) && mins >= minutesOf(s.quietStart) && mins < minutesOf(s.quietEnd);
+}
+
+/**
+ * Phone-test override: SMS_TEST_ANY_TIME=on lets texts go out on any day at any hour, but ONLY
+ * when SMS_ALLOWED_NUMBERS is also set (the server can text nothing but the listed test phones)
+ * and never in production. Real patients always get the R7.1 window.
+ */
+export function testAnyTime(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.SMS_TEST_ANY_TIME === 'on' && !!allowedNumbers(env) && env.NODE_ENV !== 'production';
 }
 
 /** Start of the next allowed window (now if already inside one). */

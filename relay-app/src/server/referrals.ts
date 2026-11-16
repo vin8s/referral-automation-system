@@ -638,7 +638,7 @@ export async function ingestReferrals(
           row.priority === 'urgent' ? 'urgent' : 'normal', row.specialty || null]);
       await audit(tx, actor, referralId, 'referral.ingest',
         `${via === 'manual' ? 'Entered manually' : 'Ingested via spreadsheet upload'} · ` +
-        (consent ? `SMS consent recorded (${consentSource})` : 'SMS consent not recorded — no texts until staff record it'));
+        (consent ? `SMS consent recorded (${consentSource})` : 'SMS consent not recorded'));
       importedCount++;
       if (consent) consentedCount++;
     }

@@ -8,12 +8,13 @@
 // All dependencies (database, SMS provider, model, clock) come in through SmsDeps so
 // tests can run the real flow against an in-memory database and a scripted model.
 
+import { isAllowedNumber } from './allowlist';
 import 'server-only';
 import type { Db, Queryable } from '@/server/db';
 import { logError } from '@/server/log';
 import { slotKey, takenSlotKeys } from '@/lib/slots';
 import {
-  detectEmergency, detectKeyword, dobMatches, redTemplateFor, resolveDecision, validateModelOutput, validateOutgoing,
+  detectEmergency, detectKeyword, dobMatches, pickDobCandidate, redTemplateFor, resolveDecision, validateModelOutput, validateOutgoing,
 } from './guards';
 import type { SmsAgentModel } from './model';
 import { phoneKey, type SmsProvider } from './provider';
@@ -24,7 +25,7 @@ import { ageOn, isWithinSendWindow, localDate, nextSendWindow, zonedParts, type 
 import { buildOfferedSlots, buildOpenSlotPool } from './slots';
 import { specialtyPhrase } from './specialty';
 import { IMMEDIATE_TEMPLATES, renderTemplate, type Lang, type TemplateId, type TemplateVars } from './templates';
-import type { HistoryTurn, OfferedSlot, RedCode, SmsTurnOutput, TurnContext } from './types';
+import type { HistoryTurn, ModelInput, OfferedSlot, RedCode, SmsTurnOutput, TurnContext } from './types';
 
 export interface SmsDeps {
   db: Db;
@@ -38,12 +39,90 @@ export interface SmsDeps {
   providers: string[];
   /** Practice specialty — never sent to the model, only used by the outbound guard. */
   specialty: string;
+  /** Upper bound for one model call (default MODEL_TIMEOUT_MS). Tests set it low. */
+  modelTimeoutMs?: number;
+  /** Upper bound for one provider send (default SEND_TIMEOUT_MS). Tests set it low. */
+  sendTimeoutMs?: number;
 }
 
 export const REVERIFY_AFTER_DAYS = 7;          // R4.4
 const HISTORY_DAYS = 30;                       // SMS_AGENT_PROMPT §1.1
 const HISTORY_MAX_TURNS = 40;
 const STAFF_MAX_CHARS = 640;
+/**
+ * The Bedrock adapter aborts each Converse call at 25 s and may make two (no-tool retry),
+ * so 60 s only trips when something below it hangs. Without a bound, a hung call would
+ * hold this patient's inbound lock (below) forever and every later text would queue behind it.
+ */
+const MODEL_TIMEOUT_MS = 60_000;
+/** The AWS SDK has no request timeout by default; a hung send must not hang the turn. */
+const SEND_TIMEOUT_MS = 20_000;
+/** Inbound texts still marked "processing" after this long are raised to staff by the sweeper. */
+const UNPROCESSED_AFTER_MS = 5 * 60_000;
+/** Marker on an inbound message row until its turn finishes (cleared on success or after an amber). */
+const PROCESSING = 'processing';
+
+// ── Robustness helpers ──────────────────────────────────────────────────────
+
+/**
+ * Makes text safe to store. Postgres rejects NUL (0x00) in text and in jsonb, and jsonb
+ * rejects lone UTF-16 surrogates (e.g. "\ud83d" in an SNS payload, or an emoji cut in
+ * half by .slice). Either used to throw mid-turn — after the inbound row was stored — so
+ * the patient got no reply and SNS retries were de-duped away (silent drop).
+ * Zero-width characters are removed so they can't split "STOP" or an emergency phrase.
+ */
+export function cleanText(s: string): string {
+  return String(s ?? '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[​-‍⁠﻿]/g, '')
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
+}
+
+/** cleanText applied to every string inside the model's raw tool output (it lands in text + jsonb columns). */
+function cleanDeep(v: unknown, depth = 0): unknown {
+  if (typeof v === 'string') return cleanText(v);
+  if (depth > 6 || v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) return v.map(x => cleanDeep(x, depth + 1));
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, cleanDeep(x, depth + 1)]));
+}
+
+/** Rejects with a TimeoutError after `ms`. The late promise's own rejection is swallowed (no unhandled rejection). */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  p.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error(`${what} timed out after ${ms} ms`), { name: 'TimeoutError' })), ms);
+    timer.unref?.();
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * One inbound turn at a time per referral (this server process; production runs one task).
+ * Two texts sent seconds apart ("03/04" … "1980", or "1" twice) used to run in parallel:
+ * both read the same conversation row, both called the model and both replied, so the
+ * patient got two answers, the DOB attempt counter lost an increment and two "captured"
+ * appointments could be written. Now the second turn waits and sees the first in history.
+ */
+const inboundLocks = (globalThis as unknown as { __relayInboundLocks?: Map<string, Promise<unknown>> });
+async function withReferralLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const locks = (inboundLocks.__relayInboundLocks ??= new Map());
+  const run = (locks.get(key) ?? Promise.resolve()).catch(() => undefined).then(fn);
+  const tail = run.catch(() => undefined);
+  locks.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (locks.get(key) === tail) locks.delete(key);
+  }
+}
+
+/**
+ * What one inbound turn did, so the turn can tell "replied / staff told" from silence.
+ * Keyed by the per-turn copy of SmsDeps that handleInbound passes down.
+ */
+interface TurnTrace { sends: SendStatus[]; alerts: number }
+const traces = new WeakMap<SmsDeps, TurnTrace>();
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -91,6 +170,8 @@ async function openSlotPool(d: SmsDeps, q: Queryable, conv: Conv): Promise<Offer
 async function raiseAmber(d: SmsDeps, ref: RefCtx, code: string, summary: string | null, pause: boolean, actor: AuditActor = AI_ACTOR) {
   const q = d.db;
   const added = await repo.addNeedsHuman(q, ref.id, code, summary, pause, d.now());
+  const trace = traces.get(d);
+  if (trace) trace.alerts++;
   if (pause) await repo.updateConv(q, ref.id, { paused: true, pausedReason: `amber:${code}` });
   if (added) await repo.audit(q, actor, ref.id, 'sms.needs_human', `Needs a human (${code.replaceAll('_', ' ')})${pause ? ' · texting paused' : ''}`);
 }
@@ -98,6 +179,8 @@ async function raiseAmber(d: SmsDeps, ref: RefCtx, code: string, summary: string
 async function raiseRed(d: SmsDeps, ref: RefCtx, code: RedCode, summary: string) {
   const q = d.db;
   await repo.escalateReferral(q, ref.id, `${code.replaceAll('_', ' ')} (SMS): ${summary}`, d.now());
+  const trace = traces.get(d);
+  if (trace) trace.alerts++;
   await repo.updateConv(q, ref.id, { paused: true, pausedReason: `red:${code}` });
   await repo.setSmsAttemptOutcome(q, ref.id, 'Escalated', `Escalated by SMS agent (${code.replaceAll('_', ' ')}).`);
   await repo.audit(q, AI_ACTOR, ref.id, 'sms.escalate', `Escalated — ${code.replaceAll('_', ' ')} (SMS). All texting paused.`);
@@ -128,7 +211,9 @@ export async function sendSms(d: SmsDeps, ref: RefCtx, opts: SendOptions): Promi
   const conv = await repo.getConv(q, ref.id);
   const settings = await repo.loadOutreachSettings(q);
   const latest = await repo.loadRef(q, ref.id) ?? ref; // opt-out may have changed this turn
+  opts = { ...opts, body: cleanText(opts.body) };
   const seg = measureSms(opts.body);
+  const trace = traces.get(d);
   const isSafety = !!opts.templateKey && IMMEDIATE_TEMPLATES.has(opts.templateKey);
   const base = {
     referralId: ref.id, patientId: ref.patientId, direction: 'outbound' as const, author: opts.author, body: opts.body,
@@ -139,12 +224,13 @@ export async function sendSms(d: SmsDeps, ref: RefCtx, opts: SendOptions): Promi
   let suppressedWhy: string | null = null;
   if (!ref.phone) suppressedWhy = 'no phone number';
   else if (latest.optedOut && !opts.allowOptedOut) suppressedWhy = 'patient opted out';
-  else if (!latest.consent && !opts.allowOptedOut && !isSafety) suppressedWhy = 'no SMS consent';
   else if (conv.numberSuppressed && !opts.allowSuppressed) suppressedWhy = 'number suppressed (wrong number)';
   else if (settings.textingPaused && !isSafety) suppressedWhy = 'all texting paused';
+  else if (!isAllowedNumber(ref.phone)) suppressedWhy = 'not on the test-phone allowlist';
   if (suppressedWhy) {
     await repo.insertMessage(q, { ...base, status: 'suppressed', errorCode: suppressedWhy });
     await repo.audit(q, opts.actor ?? AI_ACTOR, ref.id, 'sms.suppressed', `Text not sent (${suppressedWhy})`);
+    trace?.sends.push('suppressed');
     return 'suppressed';
   }
 
@@ -155,11 +241,14 @@ export async function sendSms(d: SmsDeps, ref: RefCtx, opts: SendOptions): Promi
     await repo.appendSmsTurn(q, ref.id, 'ai', opts.body, now);
     await repo.audit(q, opts.actor ?? AI_ACTOR, ref.id, 'sms.held',
       `Text held for quiet hours until ${fmtLocal(at, d.tz)}${opts.templateKey ? ` (${opts.templateKey})` : ''}`);
+    trace?.sends.push('held');
     return 'held';
   }
 
   const id = await repo.insertMessage(q, { ...base, status: 'sending' });
   const status = await deliver(d, id!, ref.phone, opts.body);
+  // Recorded before the bookkeeping below so a later DB error can't hide that a text already went out.
+  trace?.sends.push(status);
   await repo.updateConv(q, ref.id, { lastOutboundAt: now });
   await repo.appendSmsTurn(q, ref.id, 'ai', opts.author === 'staff' ? `[Staff] ${opts.body}` : opts.body, now);
   await repo.audit(q, opts.actor ?? AI_ACTOR, ref.id, status === 'failed' ? 'sms.failed' : 'sms.sent',
@@ -167,9 +256,14 @@ export async function sendSms(d: SmsDeps, ref: RefCtx, opts: SendOptions): Promi
   return status;
 }
 
+/**
+ * Sends one text. Exactly one provider attempt: an error (or a timeout, where the text
+ * may still have gone out) marks the row failed and is never retried here, so a patient
+ * can't get the same text twice. Callers raise an amber item for failed sends.
+ */
 async function deliver(d: SmsDeps, messageId: string, to: string, body: string): Promise<SendStatus> {
   try {
-    const res = await d.provider.send({ to, body });
+    const res = await withTimeout(Promise.resolve().then(() => d.provider.send({ to, body })), d.sendTimeoutMs ?? SEND_TIMEOUT_MS, 'sms send');
     await repo.updateMessageStatus(d.db, messageId, {
       status: res.status, provider: d.provider.name, providerMessageId: res.providerMessageId, sentAt: d.now(),
     });
@@ -212,16 +306,24 @@ export async function flushHeld(d: SmsDeps, settings: OutreachSettings): Promise
   let n = 0;
   for (const m of await repo.listDueHeld(d.db, now)) {
     if (!m.referral_id) continue;
-    const ref = await repo.loadRef(d.db, m.referral_id);
-    const conv = ref && await repo.findConv(d.db, ref.id);
-    if (!ref || !conv || ref.optedOut || !ref.consent || conv.numberSuppressed) {
-      await repo.updateMessageStatus(d.db, m.id, { status: 'suppressed', errorCode: 'no longer allowed to text' });
-      continue;
+    // One bad row must not stop the other held texts (or the rest of the outreach tick).
+    try {
+      const ref = await repo.loadRef(d.db, m.referral_id);
+      const conv = ref && await repo.findConv(d.db, ref.id);
+      if (!ref || !conv || ref.optedOut || conv.numberSuppressed || !isAllowedNumber(ref.phone)) {
+        await repo.updateMessageStatus(d.db, m.id, { status: 'suppressed', errorCode: 'no longer allowed to text' });
+        continue;
+      }
+      await repo.updateMessageStatus(d.db, m.id, { status: 'sending' });
+      const s = await deliver(d, m.id, ref.phone, m.body);
+      await repo.audit(d.db, SYSTEM_ACTOR, ref.id, s === 'failed' ? 'sms.failed' : 'sms.sent',
+        `Held text ${s === 'failed' ? 'failed' : 'sent'}${m.template_key ? ` (${m.template_key})` : ''}`);
+      if (s !== 'failed') n++;
+      // A held reply that fails would otherwise just sit as "failed" in the thread: tell staff.
+      else await raiseAmber(d, ref, 'agent_error', 'A text held for quiet hours could not be sent. Please read the thread and contact the patient.', true, SYSTEM_ACTOR);
+    } catch (err) {
+      logError('sms flush held', err);
     }
-    await repo.updateMessageStatus(d.db, m.id, { status: 'sending' });
-    const s = await deliver(d, m.id, ref.phone, m.body);
-    await repo.audit(d.db, SYSTEM_ACTOR, ref.id, 'sms.sent', `Held text sent${m.template_key ? ` (${m.template_key})` : ''}`);
-    if (s !== 'failed') n++;
   }
   return n;
 }
@@ -241,22 +343,128 @@ export interface InboundResult {
   referralId: string | null;
   duplicate?: boolean;
   outcome: string;
+  /** Internal: this outcome legitimately sends nothing and raises nothing (stripped before returning). */
+  silentOk?: boolean;
 }
 
+/**
+ * Handles one inbound text. Never throws once the text is stored: any failure after that
+ * becomes an amber agent_error item (and, if even that can't be written, the row keeps its
+ * "processing" marker and sweepUnprocessedInbound raises it on the next outreach tick).
+ * It only throws when the text could not be stored at all, so the webhook returns 5xx and
+ * SNS retries a delivery that genuinely did nothing.
+ */
 export async function handleInbound(d: SmsDeps, input: InboundInput): Promise<InboundResult> {
   const q = d.db;
-  const now = d.now();
-  const referralId = input.referralId ?? await repo.findReferralByPhone(q, phoneKey(input.from));
-
+  const from = String(input.from ?? '');
+  const body = cleanText(input.body);
+  const key = phoneKey(from);
+  // A sender without a full phone number (empty, alphanumeric, short code) must never match:
+  // phoneKey('') is '' and used to match the first patient with NO phone on file.
+  const referralId = input.referralId ?? (key.length === 10 ? await repo.findReferralByPhone(q, key) : null);
   const ref = referralId ? await repo.loadRef(q, referralId) : null;
-  const msgId = await repo.insertMessage(q, {
-    referralId: ref?.id ?? null, patientId: ref?.patientId ?? null, direction: 'inbound', author: 'patient',
-    body: input.body.slice(0, 2000), status: 'received', provider: input.provider ?? d.provider.name,
-    providerMessageId: input.providerMessageId ?? null, fromNumber: input.from, createdAt: now,
-  });
-  if (!msgId) return { referralId: ref?.id ?? null, duplicate: true, outcome: 'duplicate' };
-  if (!ref) return { referralId: null, outcome: 'unknown number (stored)' };
+  if (!ref) {
+    const stored = await repo.insertMessage(q, {
+      referralId: null, patientId: null, direction: 'inbound', author: 'patient',
+      body: cleanText(body.slice(0, 2000)), status: 'received', provider: input.provider ?? d.provider.name,
+      providerMessageId: input.providerMessageId ?? null, fromNumber: from, createdAt: d.now(),
+    });
+    return stored ? { referralId: null, outcome: 'unknown number (stored)' } : { referralId: null, duplicate: true, outcome: 'duplicate' };
+  }
+  return withReferralLock(ref.id, () => inboundTurn(d, { ...input, from, body }, ref));
+}
 
+async function inboundTurn(d0: SmsDeps, input: InboundInput, ref0: RefCtx): Promise<InboundResult> {
+  const q = d0.db;
+  const now = d0.now();
+  // Re-read inside the lock: the turn that just finished may have changed state or opt-out.
+  const ref = await repo.loadRef(q, ref0.id) ?? ref0;
+  const msgId = await repo.insertMessage(q, {
+    referralId: ref.id, patientId: ref.patientId, direction: 'inbound', author: 'patient',
+    body: cleanText(input.body.slice(0, 2000)), status: 'received', provider: input.provider ?? d0.provider.name,
+    providerMessageId: input.providerMessageId ?? null, fromNumber: input.from, createdAt: now, errorCode: PROCESSING,
+  });
+  if (!msgId) return { referralId: ref.id, duplicate: true, outcome: 'duplicate' };
+
+  const trace: TurnTrace = { sends: [], alerts: 0 };
+  const d: SmsDeps = { ...d0 };
+  traces.set(d, trace);
+  let result: InboundResult;
+  try {
+    result = await processInbound(d, input, ref, msgId, now);
+    result = await ensureNotSilent(d, ref, result, trace);
+  } catch (err) {
+    logError('sms inbound turn', err);
+    try {
+      await raiseAmber(d, ref, 'agent_error',
+        `Relay hit an error (${(err as { name?: string })?.name ?? 'Error'}) while handling a text from the patient. A reply may not have gone out. Please read the thread and reply.`, true);
+      result = { referralId: ref.id, outcome: 'amber agent_error (exception)' };
+    } catch (err2) {
+      // Database unavailable: leave the "processing" marker for the sweeper. Returning (not
+      // throwing) means SNS doesn't retry into the de-dupe and drop the text silently.
+      logError('sms inbound fallback', err2);
+      return { referralId: ref.id, outcome: 'error (left for sweeper)' };
+    }
+  }
+  await q.query(`update messages set error_code = null where id = $1 and error_code = $2`, [msgId, PROCESSING])
+    .catch(err => logError('sms inbound mark processed', err));
+  const { silentOk: _silentOk, ...out } = result;
+  return out;
+}
+
+/**
+ * The "never silent" net. When a turn on an active thread ends with nothing sent and no
+ * red/amber raised (the model returned an empty reply, asked for a template code refused,
+ * …) or with a reply the provider failed to send, staff get an amber agent_error.
+ */
+async function ensureNotSilent(d: SmsDeps, ref: RefCtx, result: InboundResult, trace: TurnTrace): Promise<InboundResult> {
+  if (result.silentOk || trace.alerts > 0) return result;
+  const failed = trace.sends.includes('failed');
+  if (!failed && trace.sends.length > 0) return result;
+  await raiseAmber(d, ref, 'agent_error', failed
+    ? 'The reply to the patient could not be sent (SMS provider error). Please read the thread and contact the patient.'
+    : 'The patient texted but no reply went out (the AI gave no usable reply). Please read the thread and reply.', true);
+  return { ...result, outcome: `${result.outcome}; amber agent_error (${failed ? 'send failed' : 'nothing sent'})` };
+}
+
+/** Thread paused / texting off / all texting paused: nothing is sent, but staff must learn the patient wrote. */
+async function notePausedReply(d: SmsDeps, ref: RefCtx): Promise<void> {
+  if ((await repo.listOpenNeedsHuman(d.db, ref.id)).length) {
+    const trace = traces.get(d);
+    if (trace) trace.alerts++; // staff already have an open item for this patient
+    return;
+  }
+  await raiseAmber(d, ref, 'patient_replied_paused', 'The patient texted while texting was paused for them. Please read the thread.', false, SYSTEM_ACTOR);
+}
+
+/**
+ * Inbound texts whose turn never finished (process restart, database outage mid-turn):
+ * still marked "processing" after UNPROCESSED_AFTER_MS. Raises one amber item each so no
+ * patient is dropped silently. Called from the outreach tick; sends nothing.
+ */
+export async function sweepUnprocessedInbound(d: SmsDeps): Promise<number> {
+  const cutoff = new Date(d.now().getTime() - UNPROCESSED_AFTER_MS);
+  const { rows } = await d.db.query<{ id: string; referral_id: string }>(
+    `select id, referral_id from messages where direction = 'inbound' and error_code = $1 and referral_id is not null
+        and created_at < $2 order by created_at limit 100`, [PROCESSING, cutoff]);
+  let n = 0;
+  for (const m of rows) {
+    try {
+      const ref = await repo.loadRef(d.db, m.referral_id);
+      if (ref) {
+        await raiseAmber(d, ref, 'agent_error', 'A text from the patient was not fully processed (server error). A reply may not have gone out. Please read the thread and reply.', true, SYSTEM_ACTOR);
+        n++;
+      }
+      await d.db.query(`update messages set error_code = null where id = $1`, [m.id]);
+    } catch (err) {
+      logError('sms sweep unprocessed', err);
+    }
+  }
+  return n;
+}
+
+async function processInbound(d: SmsDeps, input: InboundInput, ref: RefCtx, msgId: string, now: Date): Promise<InboundResult> {
+  const q = d.db;
   const conv = await repo.getConv(q, ref.id);
   const lastActivity = Math.max(conv.lastInboundAt?.getTime() ?? 0, conv.lastOutboundAt?.getTime() ?? 0);
   const isNewConversation = !lastActivity || now.getTime() - lastActivity > 24 * 3600_000;
@@ -278,7 +486,7 @@ export async function handleInbound(d: SmsDeps, input: InboundInput): Promise<In
       await raiseRed(d, ref, backstop.code, `${quote} (number opted out / suppressed — no text sent; call the patient)`);
       return { referralId: ref.id, outcome: 'red (no SMS: opted out)' };
     }
-    return { referralId: ref.id, outcome: 'stored (opted out / suppressed)' };
+    return { referralId: ref.id, outcome: 'stored (opted out / suppressed)', silentOk: true };
   }
 
   // 4. Already red: only the short supportive line, never scheduling (R1.2.5)
@@ -297,6 +505,7 @@ export async function handleInbound(d: SmsDeps, input: InboundInput): Promise<In
       await sendTemplate(d, ref, redTemplateFor(backstop.code), lang);
       return { referralId: ref.id, outcome: 'red (texting paused)' };
     }
+    await notePausedReply(d, ref);
     return { referralId: ref.id, outcome: 'stored (all texting paused)' };
   }
 
@@ -338,10 +547,13 @@ export async function handleInbound(d: SmsDeps, input: InboundInput): Promise<In
   let modelError: string | null = null;
   try {
     const turnInput = { clinicName: d.clinicName, patientFirstName: ref.firstName, history, patientMessage: input.body, context };
-    let v = validateModelOutput(await d.model.turn(turnInput));
+    // Bounded in time, and every string cleaned before validation (NUL / lone surrogates break the inserts).
+    const ask = async (inp: ModelInput) => validateModelOutput(cleanDeep(
+      await withTimeout(Promise.resolve().then(() => d.model.turn(inp)), d.modelTimeoutMs ?? MODEL_TIMEOUT_MS, 'model turn')));
+    let v = await ask(turnInput);
     if (!v.ok) {
       // One correction attempt (e.g. reply_text over 300 characters). Every check still applies after.
-      v = validateModelOutput(await d.model.turn({ ...turnInput, correction: v.errors.slice(0, 5).join(', ') }));
+      v = await ask({ ...turnInput, correction: v.errors.slice(0, 5).join(', ') });
     }
     if (v.ok) out = v.output;
     else modelError = `invalid model output: ${v.errors.slice(0, 5).join(', ')}`;
@@ -378,7 +590,7 @@ async function handleKeyword(
     if (kw.keyword === 'CANCEL' && ref.state === 'Booked') {
       await raiseAmber(d, ref, 'appointment_change', 'Patient replied CANCEL and has a Booked appointment — check whether they meant the appointment.', true, SYSTEM_ACTOR);
     }
-    return { referralId: ref.id, outcome: 'opted out' };
+    return { referralId: ref.id, outcome: 'opted out', silentOk: already }; // a repeat STOP gets no second confirmation
   }
   if (kw.action === 'help') {
     await sendTemplate(d, ref, 'help_reply', lang, {}, { allowOptedOut: true });
@@ -494,14 +706,18 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
     // Paused thread: record new amber reasons for staff, send nothing.
     if (out.escalation.tier === 'amber' && out.escalation.reason_code) {
       await raiseAmber(d, ref, out.escalation.reason_code, summary, out.escalation.pause_automation);
+    } else {
+      await notePausedReply(d, ref);
     }
     return { referralId: ref.id, outcome: 'stored (thread paused)' };
   }
 
-  // Identity check by code (R4.2) — only when the model extracted a DOB and no handoff applies.
+  // Identity check by code (R4.2) — when the patient's text or the model holds a DOB and no handoff applies.
+  // Code's parse of the patient's own words wins; the model's extraction is the fallback (one guess per text).
   const handoff = decision.kind === 'amber' && decision.pause;
-  if (!conv.identityVerified && out.identity.dob_candidate && !handoff) {
-    return identityStep(d, ref, conv, out.identity.dob_candidate, lang);
+  const dobCandidate = conv.identityVerified ? null : pickDobCandidate(st.body, out.identity.dob_candidate, d.now());
+  if (dobCandidate && !handoff) {
+    return identityStep(d, ref, conv, dobCandidate, lang);
   }
 
   switch (decision.kind) {
@@ -533,7 +749,11 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
       if (out.call_outcome && ['Interested', 'Call Back Requested', 'Declined Referral'].includes(out.call_outcome)) {
         await repo.setSmsAttemptOutcome(q, ref.id, out.call_outcome);
       }
-      return { referralId: ref.id, outcome: 'reply' };
+      // "ok thanks" once a time is picked / booked needs no answer. Any other empty turn is caught by ensureNotSilent.
+      return {
+        referralId: ref.id, outcome: 'reply',
+        silentOk: out.intent === 'acknowledgement' && (!!conv.capturedSlotId || ref.state === 'Pending Confirmation' || ref.state === 'Booked'),
+      };
   }
   return { referralId: ref.id, outcome: 'none' };
 }
@@ -557,6 +777,13 @@ async function sendAiReply(d: SmsDeps, ref: RefCtx, conv: Conv, text: string, st
     offeredSlots: [...conv.offeredSlots, ...st.pool], identityVerified: conv.identityVerified,
   });
   if (problems.length) {
+    if (!conv.identityVerified) {
+      // Before identity is verified the only job is to get a date of birth. Blocking the AI's reply
+      // (it often echoes a typed date back) must not pause the thread: send the fixed DOB request instead.
+      await repo.audit(d.db, AI_ACTOR, ref.id, 'sms.guard_blocked', `AI reply blocked (${problems.join(', ')}); sent the date-of-birth request instead`);
+      await sendTemplate(d, ref, 'identity_ask', st.lang);
+      return;
+    }
     await raiseAmber(d, ref, 'agent_error', `AI reply blocked by the outbound guard: ${problems.join(', ')}.`, true);
     return;
   }
@@ -573,7 +800,7 @@ async function identityStep(d: SmsDeps, ref: RefCtx, conv: Conv, candidate: stri
     await sendTemplate(d, ref, 'identity_not_verified', lang);
     return { referralId: ref.id, outcome: 'amber identity_failed (no DOB on file)' };
   }
-  if (dobMatches(candidate, ref.dobIso)) {
+  if (dobMatches(candidate, ref.dobIso, d.now())) {
     const slots = await freshSlots(d, q, conv);
     await repo.updateConv(q, ref.id, {
       identityVerified: true, identityVerifiedAt: d.now(), identityAttempts: 0, offeredSlots: slots,
@@ -618,6 +845,7 @@ async function captureStep(d: SmsDeps, ref: RefCtx, conv: Conv, slotId: string, 
     const slots = await freshSlots(d, q, conv);
     await repo.updateConv(q, ref.id, { offeredSlots: slots });
     if (slots.length >= 2) await sendTemplate(d, ref, 'slot_offer', lang, slotVars(slots, lang));
+    else await raiseAmber(d, ref, 'no_slot_works', 'The picked time was taken and no other open times are left to offer by text.', true);
     return { referralId: ref.id, outcome: 'slot no longer free; re-offered' };
   }
   await repo.captureSlot(q, ref.id, slot, d.now());
@@ -642,7 +870,6 @@ export async function staffSend(d: SmsDeps, referralId: string, body: string, ac
   const ref = await repo.loadRef(d.db, referralId);
   if (!ref) throw new SmsActionError(404, 'Referral not found.');
   if (ref.optedOut) throw new SmsActionError(409, 'This patient opted out of texts. Call them instead.');
-  if (!ref.consent) throw new SmsActionError(409, 'No SMS consent on file. Record consent first.');
   const conv = await repo.getConv(d.db, referralId);
   if (conv.numberSuppressed) throw new SmsActionError(409, 'This number was reported as a wrong number.');
   if ((await repo.loadOutreachSettings(d.db)).textingPaused) throw new SmsActionError(409, 'All texting is paused in Settings.');
@@ -718,7 +945,7 @@ export async function afterAppointmentCancelled(d: SmsDeps, referralId: string):
   }
   const lang = repo.langFromPatient(ref.language);
   const minor = !!ref.dobIso && ageOn(ref.dobIso, d.now(), d.tz) < 18;
-  if (conv.paused || conv.numberSuppressed || conv.channelPreference !== 'sms' || ref.optedOut || !ref.consent
+  if (conv.paused || conv.numberSuppressed || conv.channelPreference !== 'sms' || ref.optedOut
     || !ref.phone || settings.textingPaused || !lang || minor) {
     return null;
   }

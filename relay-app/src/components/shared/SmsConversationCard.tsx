@@ -81,10 +81,9 @@ export function SmsConversationCard({
 
   const c = thread.conversation;
   const k = thread.consent;
-  const canText = k.consent && !k.optedOut && !c.numberSuppressed && !thread.textingPaused;
+  const canText = !k.optedOut && !c.numberSuppressed && !thread.textingPaused;
   const blockedWhy = thread.textingPaused ? 'All texting is paused in Settings.'
     : k.optedOut ? 'Patient opted out of texts — call instead.'
-    : !k.consent ? 'No SMS consent on file.'
     : c.numberSuppressed ? 'Number reported as a wrong number.' : null;
 
   const sendStaff = async () => {
@@ -113,7 +112,7 @@ export function SmsConversationCard({
             ? <span style={pill('var(--st-lost-bg)', 'var(--st-lost-fg)')} title={`${k.optOutSource ?? ''} · ${k.optedOutAt ?? ''}`}><Icon name="x" size={10} /> Opted out</span>
             : k.consent
               ? <span style={pill('var(--st-won-bg)', 'var(--st-won-fg)')} title={`${k.consentSource ?? ''} · ${k.consentAt ?? ''}`}><Icon name="check" size={10} /> SMS consent</span>
-              : <span style={pill('var(--st-lost-bg)', 'var(--st-lost-fg)')}>No SMS consent</span>}
+              : null}
           {thread.needsHuman.length > 0 && <NeedsHumanPill />}
           {thread.textingPaused && <span style={pill('var(--relay-urgent-100)', 'var(--relay-urgent-700)')}><Icon name="pause" size={10} /> All texting paused</span>}
         </div>

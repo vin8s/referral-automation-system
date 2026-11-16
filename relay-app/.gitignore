@@ -46,3 +46,6 @@ next-env.d.ts
 
 # bundled DB CLI for the Docker image (npm run build:db-cli)
 /dist-scripts/
+
+# phone test runtime state (tunnel URL, SNS subscription, logs)
+/.phone-test/

@@ -56,7 +56,7 @@ export const REASON_LABELS: Record<string, string> = {
   no_slot_works: 'No offered time works', appointment_change: 'Wants to change appointment',
   off_topic_repeated: 'Off-topic / abusive', agent_error: 'AI error — nothing sent',
   cadence_exhausted: 'No reply after final text', urgent_referral: 'Urgent referral — call today',
-  opted_back_in: 'Opted back in (START)',
+  opted_back_in: 'Opted back in (START)', patient_replied_paused: 'Texted while texting was paused',
   ecw_no_show: 'No show in eCW — call first', ecw_rescheduled: 'Rescheduled in eCW — check new time',
   ecw_cancelled: 'Cancelled in eCW — call patient',
 };
@@ -162,8 +162,30 @@ export async function simulatePatientText(referralId: string, body: string, user
   return handleInbound(d, { from: ref.phone, body: text, referralId, provider: 'mock' });
 }
 
+/** Stand-ins used when the real model / provider can't be built (misconfiguration): every use throws. */
+const brokenModel = (err: unknown): SmsDeps['model'] => ({ name: 'scripted', turn: async () => { throw err; } });
+const brokenProvider = (err: unknown): SmsDeps['provider'] => ({ name: smsProviderName(), send: async () => { throw err; } });
+
 export async function receiveInboundSms(input: { from: string; body: string; providerMessageId?: string | null; provider?: 'aws' | 'twilio' }) {
-  return handleInbound(await smsDeps(), { ...input, provider: input.provider ?? 'aws' });
+  // smsDeps() throws when AI_PROVIDER / SMS_PROVIDER is misconfigured. That used to fail the
+  // webhook before the text was even stored: SNS retried a few times and the text was lost.
+  // Now the text is stored and the engine's own fail-safes raise an amber item instead.
+  // (A database that can't be reached still throws, so SNS retries.)
+  const raw = getRawSettings();
+  let model: SmsDeps['model'];
+  let provider: SmsDeps['provider'];
+  try { model = getSmsAgentModel(); } catch (err) { logInboundSetup('model', err); model = brokenModel(err); }
+  try { provider = getSmsProvider(); } catch (err) { logInboundSetup('provider', err); provider = brokenProvider(err); }
+  const d: SmsDeps = {
+    db: await getDb(), provider, model, now: () => new Date(), tz: clinicTimeZone(),
+    clinicName: clinicDisplayName(), clinicPhone: clinicPhoneNumber(),
+    providers: raw.practiceProfile.providers, specialty: getOrg().specialty,
+  };
+  return handleInbound(d, { ...input, provider: input.provider ?? 'aws' });
+}
+
+function logInboundSetup(what: string, err: unknown) { // never logs the body or the number
+  void import('@/server/log').then(({ logError }) => logError(`inbound sms ${what} setup`, err));
 }
 
 export async function listNeedsHuman(): Promise<NeedsHumanItem[]> {
@@ -311,7 +333,6 @@ export async function withSmsExcerpts(items: ConfirmQueueItem[]): Promise<Confir
 /** Why a referral can't be texted yet, using the same rules as the outreach scheduler. */
 function blockedReason(ref: repo.RefCtx, conv: repo.Conv | null, now: Date, tz: string): string | null {
   if (ref.optedOut) return 'Opted out of texts';
-  if (!ref.consent) return 'No SMS consent recorded';
   if (!ref.phone) return 'No mobile number';
   if (conv?.numberSuppressed) return 'Reported wrong number';
   if (conv && conv.channelPreference !== 'sms') return 'Texting turned off for this referral';

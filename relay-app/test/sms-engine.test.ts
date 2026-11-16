@@ -164,6 +164,40 @@ describe('identity (case 11) [BLOCKER]', () => {
   });
 });
 
+describe('identity: natural-language DOB, code reads the patient text first', () => {
+  const dobTurn = (dob: string | null) => () => turn({ intent: 'identity_response', identity: { dob_candidate: dob, says_not_patient: false, says_is_proxy: false } });
+
+  it('verifies when the model missed the DOB but the text holds it', async () => {
+    const h = harness(db, dobTurn(null));
+    await runOutreachTick(h.deps);
+    await say(h, 'claro, es el 4 de marzo del 80');
+    expect((await templates()).at(-1)).toBe('slot_offer');
+  });
+
+  it('verifies on the patient text even when the model normalized it wrong', async () => {
+    const h = harness(db, dobTurn('1980-04-03')); // model read it day-first
+    await runOutreachTick(h.deps);
+    await say(h, '3:4:1980');
+    expect((await templates()).at(-1)).toBe('slot_offer');
+  });
+
+  it('a wrong date in the text is not rescued by a matching model value', async () => {
+    const h = harness(db, dobTurn('1980-03-04'));
+    await runOutreachTick(h.deps);
+    await say(h, 'march 5 1980');
+    expect((await templates()).at(-1)).toBe('identity_retry');
+  });
+
+  it('a list of dates is one guess (the model’s pick), not several', async () => {
+    const h = harness(db, dobTurn('1980-03-05'));
+    await runOutreachTick(h.deps);
+    await say(h, '3/3/1980 3/4/1980 3/5/1980');
+    expect((await templates()).at(-1)).toBe('identity_retry');
+    const { rows } = await db.query<{ identity_attempts: number }>(`select identity_attempts from sms_conversations where referral_id = $1`, [ref]);
+    expect(rows[0]?.identity_attempts).toBe(1);
+  });
+});
+
 describe('red tier [BLOCKER]', () => {
   it('case 14: model red → emergency_reply, Escalated, all texting paused', async () => {
     const h = harness(db);
@@ -408,10 +442,10 @@ describe('fail-safes', () => {
     expect(rows[0].sms_opted_out).toBe(true);
   });
 
-  it('no SMS consent → never texted', async () => {
+  it('no SMS consent recorded → still texted (owner decision 2026-11-14: consent is not a send gate)', async () => {
     await db.query(`update patients set sms_consent = false`);
     const h = harness(db);
-    expect((await runOutreachTick(h.deps)).sent).toBe(0);
+    expect((await runOutreachTick(h.deps)).sent).toBe(1);
   });
 });
 

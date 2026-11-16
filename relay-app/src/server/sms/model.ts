@@ -202,7 +202,10 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
     if (!this.client) {
       this.client = import('@aws-sdk/client-bedrock-runtime').then(
         ({ BedrockRuntimeClient }) => new BedrockRuntimeClient({ region: process.env.AWS_REGION }),
-      );
+      ).catch(err => {
+        this.client = null; // don't cache a failed load: every later turn would fail with it
+        throw err;
+      });
     }
     return this.client;
   }
@@ -220,7 +223,9 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
       else messages.push({ role, content: [{ text }] });
     };
     if (input.history[0]?.role === 'assistant') push('user', '[SMS thread started by the clinic]');
-    for (const h of input.history) push(h.role, h.role === 'user' ? sanitizePatientText(h.text) : h.text);
+    // Bedrock rejects blank text blocks; a blank SMS must not poison the history for every later turn.
+    const nonBlank = (t: string) => (t && t.trim() ? t : '[empty message]');
+    for (const h of input.history) push(h.role, nonBlank(h.role === 'user' ? sanitizePatientText(h.text) : h.text));
     push('user', sanitizePatientText(input.patientMessage) || '(empty message)');
     messages[messages.length - 1].content.push({ text: `<turn_context>${JSON.stringify(input.context)}</turn_context>` });
     if (input.correction) {
@@ -272,8 +277,41 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
       throw Object.assign(new Error(`model stopped: ${String(res.stopReason)}`), { name: 'ModelStopped' });
     }
     if (calls.length !== 1) throw Object.assign(new Error(`expected one sms_turn call, got ${calls.length}`), { name: 'NoToolUse' });
-    return calls[0].toolUse!.input;
+    return coerceToolInput(calls[0].toolUse!.input);
   }
+}
+
+const OBJECT_FIELDS = ['identity', 'escalation', 'captured_slot', 'preferences'] as const;
+const BOOL_FIELDS = ['opt_out', 'help_requested', 'wrong_number', 'conversation_complete'] as const;
+const NULLABLE_FIELDS = ['reply_text', 'use_template', 'language_switch_request', 'call_outcome', 'captured_slot', 'preferences'] as const;
+
+/**
+ * Repairs the common, unambiguous ways Claude mis-serializes a nested tool input, which
+ * otherwise fail validation and end the turn as an amber agent_error:
+ *   - the whole input as a JSON string
+ *   - a nested object/array sent as a JSON string ("identity": "{\"dob_candidate\": …}")
+ *   - "true"/"false" for booleans, "null" for nullable fields
+ * Nothing is guessed: anything else is returned unchanged for validateModelOutput to judge.
+ */
+export function coerceToolInput(input: unknown): unknown {
+  const parse = (s: string): unknown => { try { return JSON.parse(s); } catch { return s; } };
+  let o = typeof input === 'string' ? parse(input) : input;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
+  o = { ...(o as Record<string, unknown>) };
+  const r = o as Record<string, unknown>;
+  for (const k of NULLABLE_FIELDS) if (r[k] === 'null') r[k] = null;
+  for (const k of OBJECT_FIELDS) {
+    if (typeof r[k] === 'string' && /^\s*\{/.test(r[k] as string)) {
+      const v = parse(r[k] as string);
+      if (v && typeof v === 'object' && !Array.isArray(v)) r[k] = v;
+    }
+  }
+  if (typeof r.friction === 'string' && /^\s*\[/.test(r.friction)) {
+    const v = parse(r.friction);
+    if (Array.isArray(v)) r.friction = v;
+  }
+  for (const k of BOOL_FIELDS) if (r[k] === 'true' || r[k] === 'false') r[k] = r[k] === 'true';
+  return r;
 }
 
 const RETRY_REMINDER =
