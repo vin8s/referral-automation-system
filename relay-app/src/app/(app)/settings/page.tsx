@@ -2,6 +2,7 @@
 
 import { PageHead } from '@/components/layout/PageHead';
 import { TextingSettings } from '@/components/screens/settings/TextingSettings';
+import { EpicSettings } from '@/components/screens/settings/EpicSettings';
 
 export default function SettingsPage() {
   return (
@@ -10,6 +11,7 @@ export default function SettingsPage() {
 
       <div className="stack">
         <TextingSettings />
+        <EpicSettings />
       </div>
     </>
   );

@@ -456,3 +456,45 @@ export interface EcwImportOverview {
 }
 
 export interface EcwImportDetail { summary: EcwImportSummary; review: EcwReviewItem[] }
+
+// ── Epic sandbox prototype (docs/EPIC_PROTOTYPE_PLAN.md) ────────────────────
+
+/** One entry of the simulated Epic referral feed (Settings → Epic sandbox). */
+export interface EpicFeedPatient {
+  /** Epic sandbox Patient FHIR ID */
+  fhirId: string;
+  /** Epic visit-type code used to find slots (sandbox: '95014') */
+  visitType: string;
+  specialty: string | null;
+}
+
+export type EpicSyncOutcome = 'imported' | 'already_open' | 'error';
+
+/** Result of one "Sync from Epic" run (also stored as the last sync result). */
+export interface EpicSyncResult {
+  /** New referrals created */
+  imported: number;
+  /** Relay patients already linked to Epic whose details changed */
+  updated: number;
+  /** Patients that already had an open referral (no new referral created) */
+  alreadyOpen: number;
+  errors: { fhirId: string; error: string }[];
+  /** 'epic-sandbox' or 'fake' */
+  connector: string;
+  /** ISO time the sync finished */
+  at: string;
+  items: { fhirId: string; outcome: EpicSyncOutcome; patient: string | null; referralId: string | null; detailsUpdated: boolean }[];
+}
+
+export interface EpicSettingsView {
+  settings: {
+    /** "Book into Epic (sandbox)": the MA's Confirm books in the Epic sandbox. Off by default. */
+    bookingEnabled: boolean;
+    patients: EpicFeedPatient[];
+    lastSyncAt: string | null;
+    lastSyncResult: EpicSyncResult | null;
+    updatedAt: string | null;
+    updatedBy: string | null;
+  };
+  connector: string;
+}

@@ -15,6 +15,7 @@ import type {
   Priority, ReferralLogEntry, RawSettings,
   SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, ReadyToTextView,
   EcwImportOverview, EcwImportStatus, EcwImportDraft, EcwApplyResult, EcwImportDetail,
+  EpicFeedPatient, EpicSettingsView, EpicSyncResult,
 } from './types';
 import type { EcwImportOptions, EcwMapping } from './ecwImport';
 
@@ -332,4 +333,21 @@ export async function approveForTexting(
   referralIds: string[],
 ): Promise<{ approved: string[]; notApproved: { referralId: string; reason: string }[] }> {
   return api('/sms/ready-to-text', { method: 'POST', body: { referralIds } });
+}
+
+// ── Epic sandbox prototype (docs/EPIC_PROTOTYPE_PLAN.md) ────────────────────
+
+/** Epic sandbox settings + which connector is active ('epic-sandbox' or the built-in 'fake'). Any staff. */
+export async function getEpicSettings(): Promise<EpicSettingsView> {
+  return api<EpicSettingsView>('/epic/settings');
+}
+
+/** Admin only: "Book into Epic (sandbox)" toggle + the simulated referral feed. Throws ApiError (400 with the message, 403). */
+export async function saveEpicSettings(s: { bookingEnabled: boolean; patients: EpicFeedPatient[] }): Promise<EpicSettingsView> {
+  return api<EpicSettingsView>('/epic/settings', { method: 'PUT', body: s });
+}
+
+/** Admin only, prototype: imports the Epic feed patients as referrals. Never sends texts. Throws ApiError. */
+export async function syncFromEpic(): Promise<EpicSyncResult> {
+  return api<EpicSyncResult>('/epic/sync', { method: 'POST' });
 }
