@@ -141,6 +141,16 @@ async function insertAll(tx: Queryable): Promise<void> {
     `update patients set sms_consent = true, sms_consent_at = now(), sms_consent_source = 'seed (fake data)'`);
 }
 
+/**
+ * Whether `npm run dev` should load the fake referrals/patients into an empty database.
+ * Off unless SEED_FAKE_DATA=true (the app starts empty); never in production.
+ * Tests and `npm run db:seed` call seedIfEmpty() directly instead (explicit opt-in).
+ */
+export function fakeSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.NODE_ENV === 'production') return false;
+  return ['true', '1', 'yes'].includes((env.SEED_FAKE_DATA ?? '').trim().toLowerCase());
+}
+
 /** Inserts the fake seed data. Returns false (and does nothing) if referrals already exist. */
 export async function seedIfEmpty(db: Db): Promise<boolean> {
   const { rows } = await db.query<{ n: number }>('select count(*)::int as n from referrals');

@@ -361,3 +361,16 @@ export async function saveEpicSettings(s: { bookingEnabled: boolean; patients: E
 export async function syncFromEpic(): Promise<EpicSyncResult> {
   return api<EpicSyncResult>('/epic/sync', { method: 'POST' });
 }
+
+// ── Demo data (prototype) ────────────────────────────────────────────────────
+
+/**
+ * Admin only: delete every referral, patient, appointment, text and import so a demo
+ * can be re-run from an empty app. Settings, users and saved column mappings are kept.
+ * `confirm` must be the word RESET.
+ */
+export async function resetDemo(
+  confirm: string,
+): Promise<{ success: boolean; total?: number; deleted?: Record<string, number>; errorMsg?: string }> {
+  return mutate('/demo/reset', 'POST', { confirm });
+}
