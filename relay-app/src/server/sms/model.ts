@@ -18,7 +18,13 @@ export interface SmsAgentModel {
   readonly name: 'mock' | 'bedrock' | 'scripted';
   /** Returns the raw tool input (validated by the caller), or throws on transport errors. */
   turn(input: ModelInput): Promise<unknown>;
+  /** Translates a fixed SMS text into another language (owner decision 2026-11-27). Optional. */
+  translate?(text: string, language: string): Promise<string | null>;
 }
+
+const TRANSLATE_PROMPT = 'You translate short text messages from a clinic to a patient. Translate the message into the language named by the user. '
+  + 'Keep every phone number, date, time, number, the numbers 911 and 988, and the words STOP, START and HELP exactly as written. '
+  + 'Use plain, polite, everyday words. Reply with only the translated message, nothing else.';
 
 // ── Mock ────────────────────────────────────────────────────────────────────
 
@@ -106,8 +112,8 @@ export class MockSmsAgentModel implements SmsAgentModel {
     if (/\bwho is this\b|\bquien (es|habla)\b/.test(t)) {
       out.intent = 'who_is_this';
       out.reply_text = es
-        ? `Soy el asistente automatizado (IA) de ${input.clinicName}. Queremos hablar con ${input.patientFirstName} sobre una cita. ¿Es usted ${input.patientFirstName}?`
-        : `I'm the automated assistant (AI) for ${input.clinicName}. We're trying to reach ${input.patientFirstName} about scheduling an appointment. Is this ${input.patientFirstName}?`;
+        ? `Le escribe el equipo de citas de ${input.clinicName}. Queremos hablar con ${input.patientFirstName} sobre una cita. ¿Es usted ${input.patientFirstName}?`
+        : `This is the scheduling team at ${input.clinicName}. We're trying to reach ${input.patientFirstName} about scheduling an appointment. Is this ${input.patientFirstName}?`;
       return out;
     }
     if (/\b(in|en) (spanish|espanol)\b/.test(t)) { out.language_switch_request = 'es'; out.language = 'es'; }
@@ -202,9 +208,27 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
     if (!this.client) {
       this.client = import('@aws-sdk/client-bedrock-runtime').then(
         ({ BedrockRuntimeClient }) => new BedrockRuntimeClient({ region: process.env.AWS_REGION }),
-      );
+      ).catch(err => {
+        this.client = null; // don't cache a failed load: every later turn would fail with it
+        throw err;
+      });
     }
     return this.client;
+  }
+
+  async translate(text: string, language: string): Promise<string | null> {
+    const modelId = process.env.BEDROCK_MODEL_ID || DEFAULT_BEDROCK_MODEL_ID;
+    const { ConverseCommand } = await import('@aws-sdk/client-bedrock-runtime');
+    const client = await this.getClient();
+    const res = await client.send(new ConverseCommand({
+      modelId,
+      system: [{ text: TRANSLATE_PROMPT }],
+      messages: [{ role: 'user', content: [{ text: `Language: ${language}\n\nMessage:\n${text}` }] }],
+      inferenceConfig: { maxTokens: 800 },
+    } as never), { abortSignal: AbortSignal.timeout(20_000) });
+    const out = (res as { output?: { message?: { content?: { text?: string }[] } } }).output?.message?.content
+      ?.map(c => c.text ?? '').join('').trim();
+    return out || null;
   }
 
   async turn(input: ModelInput): Promise<unknown> {
@@ -220,7 +244,9 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
       else messages.push({ role, content: [{ text }] });
     };
     if (input.history[0]?.role === 'assistant') push('user', '[SMS thread started by the clinic]');
-    for (const h of input.history) push(h.role, h.role === 'user' ? sanitizePatientText(h.text) : h.text);
+    // Bedrock rejects blank text blocks; a blank SMS must not poison the history for every later turn.
+    const nonBlank = (t: string) => (t && t.trim() ? t : '[empty message]');
+    for (const h of input.history) push(h.role, nonBlank(h.role === 'user' ? sanitizePatientText(h.text) : h.text));
     push('user', sanitizePatientText(input.patientMessage) || '(empty message)');
     messages[messages.length - 1].content.push({ text: `<turn_context>${JSON.stringify(input.context)}</turn_context>` });
     if (input.correction) {
@@ -272,8 +298,41 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
       throw Object.assign(new Error(`model stopped: ${String(res.stopReason)}`), { name: 'ModelStopped' });
     }
     if (calls.length !== 1) throw Object.assign(new Error(`expected one sms_turn call, got ${calls.length}`), { name: 'NoToolUse' });
-    return calls[0].toolUse!.input;
+    return coerceToolInput(calls[0].toolUse!.input);
   }
+}
+
+const OBJECT_FIELDS = ['identity', 'escalation', 'captured_slot', 'preferences'] as const;
+const BOOL_FIELDS = ['opt_out', 'help_requested', 'wrong_number', 'conversation_complete'] as const;
+const NULLABLE_FIELDS = ['reply_text', 'use_template', 'language_switch_request', 'call_outcome', 'captured_slot', 'preferences'] as const;
+
+/**
+ * Repairs the common, unambiguous ways Claude mis-serializes a nested tool input, which
+ * otherwise fail validation and end the turn as an amber agent_error:
+ *   - the whole input as a JSON string
+ *   - a nested object/array sent as a JSON string ("identity": "{\"dob_candidate\": …}")
+ *   - "true"/"false" for booleans, "null" for nullable fields
+ * Nothing is guessed: anything else is returned unchanged for validateModelOutput to judge.
+ */
+export function coerceToolInput(input: unknown): unknown {
+  const parse = (s: string): unknown => { try { return JSON.parse(s); } catch { return s; } };
+  let o = typeof input === 'string' ? parse(input) : input;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
+  o = { ...(o as Record<string, unknown>) };
+  const r = o as Record<string, unknown>;
+  for (const k of NULLABLE_FIELDS) if (r[k] === 'null') r[k] = null;
+  for (const k of OBJECT_FIELDS) {
+    if (typeof r[k] === 'string' && /^\s*\{/.test(r[k] as string)) {
+      const v = parse(r[k] as string);
+      if (v && typeof v === 'object' && !Array.isArray(v)) r[k] = v;
+    }
+  }
+  if (typeof r.friction === 'string' && /^\s*\[/.test(r.friction)) {
+    const v = parse(r.friction);
+    if (Array.isArray(v)) r.friction = v;
+  }
+  for (const k of BOOL_FIELDS) if (r[k] === 'true' || r[k] === 'false') r[k] = r[k] === 'true';
+  return r;
 }
 
 const RETRY_REMINDER =

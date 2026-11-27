@@ -713,6 +713,9 @@ function managedLoginSettings(): Record<string, unknown> {
       form: {
         displayGraphics: true,
         instructions: { enabled: false },
+        // Option 8 (2026-11-27): staff go straight to this page. Spanish comes from Relay's ?lang=es
+        // (/login?lang=es), which Cognito then remembers in a cookie; the on-page selector did not
+        // appear in testing, so it stays off.
         languageSelector: { enabled: false },
         location: { horizontal: 'CENTER', vertical: 'CENTER' },
         sessionTimerDisplay: 'NONE',

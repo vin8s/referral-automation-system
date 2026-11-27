@@ -129,9 +129,23 @@ describe('precedence (red > opt_out > wrong_number > amber > captured_slot > rep
   it('wrong number beats amber', () => {
     expect(resolveDecision(out({ wrong_number: true, escalation: amber('wrong_number', true) }), opts).kind).toBe('wrong_number');
   });
-  it('amber with pause beats a captured slot and defaults to human_handoff', () => {
+  it('amber with pause beats a captured slot; the AI reply is kept when there is one', () => {
     const d = resolveDecision(out({ escalation: amber('clinical_question', true), captured_slot: { slot_id: 's_a', patient_text: '1' }, reply_text: 'hi' }), opts);
-    expect(d).toMatchObject({ kind: 'amber', template: 'human_handoff', alsoCapture: null });
+    expect(d).toMatchObject({ kind: 'amber', template: null, replyText: 'hi', alsoCapture: null });
+  });
+  it('a person request with no reply defaults to human_handoff; no_slot_works to no_slot_noted', () => {
+    expect(resolveDecision(out({ escalation: amber('human_requested', true) }), opts)).toMatchObject({ kind: 'amber', template: 'human_handoff' });
+    expect(resolveDecision(out({ escalation: amber('no_slot_works', true) }), opts)).toMatchObject({ kind: 'amber', template: 'no_slot_noted' });
+  });
+  it('owner review 2026-11-27: some reasons always get their fixed line, whatever the model wrote', () => {
+    const fixed = (code: string) => resolveDecision(out({ escalation: amber(code, false), reply_text: 'AI words' }), opts);
+    expect(fixed('cost_insurance_question')).toMatchObject({ template: 'cost_question', replyText: null });
+    expect(fixed('proxy_or_caregiver')).toMatchObject({ template: 'proxy_reply', replyText: null });
+    expect(fixed('appointment_change')).toMatchObject({ template: 'cancel_by_phone', replyText: null });
+    expect(fixed('off_topic_repeated')).toMatchObject({ template: 'call_for_help', replyText: null });
+    // A template the reason doesn't allow is ignored (the AI reply is used instead).
+    expect(resolveDecision(out({ escalation: amber('clinical_question', false), use_template: 'cost_question', reply_text: 'x' }), opts))
+      .toMatchObject({ template: null, replyText: 'x' });
   });
   it('amber without pause still lets a valid slot through', () => {
     const d = resolveDecision(out({ escalation: amber('transport_assistance', false), captured_slot: { slot_id: 's_b', patient_text: 'wed' } }), opts);
@@ -181,9 +195,9 @@ describe('templates + segments', () => {
     expect(t.encoding).toBe('GSM-7');
     expect(t.segments).toBeLessThanOrEqual(2);
   });
-  it('first outreach discloses AI and asks only for DOB', () => {
-    const t = renderTemplate('first_outreach', 'en', { patient_first_name: 'Grace', clinic_name: 'Community Health Clinic' });
-    expect(t.text).toContain('(AI)');
+  it('first outreach uses the owner-approved wording and asks only for DOB', () => {
+    const t = renderTemplate('first_outreach', 'en', { patient_first_name: 'Grace', clinic_name: 'Rhode Island Free Clinic' });
+    expect(t.text).toBe('Hi Grace, this is the scheduling team at Rhode Island Free Clinic. Your provider asked us to help you make an appointment. To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.');
     expect(t.text).toContain('date of birth');
     expect(t.segments).toBe(2);
   });
@@ -195,5 +209,18 @@ describe('templates + segments', () => {
   it('counts UCS-2 when a non-GSM accent is present', () => {
     expect(measureSms('sábado').encoding).toBe('UCS-2');
     expect(measureSms('miércoles').encoding).toBe('GSM-7');
+  });
+});
+
+describe('specialty phrase', () => {
+  it('sanitizes staff input so it can never carry digits, links or punctuation', async () => {
+    const { specialtyPhrase } = await import('@/server/sms/specialty');
+    expect(specialtyPhrase('Primary care', 'en')).toBe(' for your primary care appointment');
+    expect(specialtyPhrase('OB/GYN', 'en')).toBe(' for your OB/GYN appointment');
+    const nasty = specialtyPhrase('call 401-555-0100 www.x.com', 'en');
+    expect(nasty).not.toMatch(/[0-9.:/]/);
+    expect(nasty.length).toBeLessThan(70);
+    expect(specialtyPhrase('', 'en')).toBe('');
+    expect(specialtyPhrase(null, 'es')).toBe('');
   });
 });

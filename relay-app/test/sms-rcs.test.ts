@@ -22,7 +22,7 @@ describe('AWS provider channel selection', () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it('detects RCS agents and the SMS_CHANNEL override', () => {
-    expect(isRcsOrigination('rcs-5e9b887f')).toBe(true);
+    expect(isRcsOrigination('rcs-00000000')).toBe(true);
     expect(isRcsOrigination('phone-123')).toBe(false);
     vi.stubEnv('SMS_CHANNEL', 'rcs');
     expect(isRcsOrigination('pool-abc')).toBe(true);

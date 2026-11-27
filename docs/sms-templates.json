@@ -14,7 +14,8 @@
         "slot_2": "Wed, Jun 4 at 2:30 PM",
         "slot_3": "Thu, Jun 5 at 9:00 AM",
         "appointment_date_time": "Tue, Jun 3 at 10:00 AM",
-        "location_short": "Main St. office"
+        "location_short": "Main St. office",
+        "specialty_phrase": " for your primary care appointment"
       },
       "es": {
         "clinic_name": "Community Health Clinic",
@@ -25,28 +26,29 @@
         "slot_2": "miércoles 4 de junio, 2:30 p. m.",
         "slot_3": "jueves 5 de junio, 9:00 a. m.",
         "appointment_date_time": "martes 3 de junio, 10:00 a. m.",
-        "location_short": "oficina de Main St."
+        "location_short": "oficina de Main St.",
+        "specialty_phrase": " para su cita de medicina general"
       }
     },
-    "notes": "filled_length/segments are for the message with the sample values filled in. Code must re-measure the final string before sending. es_gsm_variant (where present) is a reworded Spanish version that stays in GSM-7; whether to use it is a clinic decision (see SMS_TEMPLATES.md)."
+    "notes": "filled_length/segments are for the message with the sample values filled in. Code must re-measure the final string before sending. es_gsm_variant (where present) is a reworded Spanish version that stays in GSM-7; whether to use it is a clinic decision (see SMS_TEMPLATES.md). specialty_phrase (slot_offer only) is filled by code from the referral specialty, after identity is verified; empty when no specialty is set (then slot_offer is 178 chars EN / 235 chars ES GSM-7 variant)."
   },
   "templates": [
     {
       "id": "first_outreach",
-      "purpose": "First message of a new outreach thread: AI disclosure + identity check. No details about the referral.",
+      "purpose": "First message of a new outreach thread: identity check only. No details about the referral (no specialty, no reason). Owner decision 2026-11-14: no \"AI\"/\"automated\" wording here; disclosure is via the intake consent form, the HELP reply and an honest answer whenever asked.",
       "trigger": "Referral moves Queued -> In Progress (day 0)",
       "quiet_hours": "Never sent in quiet hours; queued to next allowed window",
       "counts_toward_cap": true,
       "requires_identity_verified": false,
       "en": {
-        "text": "Hi {{patient_first_name}}, this is the automated scheduling assistant (AI) for {{clinic_name}}. Your provider asked us to help you make an appointment. To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.",
-        "filled_length": 245,
+        "text": "Hi {{patient_first_name}}, this is the scheduling team at {{clinic_name}}. Your provider asked us to help you make an appointment. To protect your privacy, please reply with your date of birth (MM/DD/YYYY). Reply STOP to opt out.",
+        "filled_length": 224,
         "encoding": "GSM-7",
         "segments": 2
       },
       "es": {
-        "text": "Hola {{patient_first_name}}, le escribe el asistente automatizado de citas (IA) de {{clinic_name}}. Su proveedor quiere que le ayudemos a hacer una cita. Para proteger su privacidad, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para dejar de recibir mensajes.",
-        "filled_length": 273,
+        "text": "Hola {{patient_first_name}}, le escribe el equipo de citas de {{clinic_name}}. Su proveedor quiere que le ayudemos a hacer una cita. Para proteger su privacidad, responda con su fecha de nacimiento (MM/DD/AAAA). Responda ALTO para dejar de recibir mensajes.",
+        "filled_length": 252,
         "encoding": "GSM-7",
         "segments": 2
       }
@@ -142,20 +144,20 @@
     },
     {
       "id": "slot_offer",
-      "purpose": "Reference shape for offering times after identity is verified. The AI normally writes this turn; code may use it as a fallback.",
+      "purpose": "Offers times after identity is verified. {{specialty_phrase}} names the referral specialty (\" for your primary care appointment\"); it is inserted by code only after the date of birth is verified and is empty when no specialty is set. This is the only text that names the specialty; the referral reason is never texted. The AI normally writes this turn; code may use it as a fallback.",
       "trigger": "Identity verified",
       "quiet_hours": "Reply held to next allowed window",
       "counts_toward_cap": false,
       "requires_identity_verified": true,
       "en": {
-        "text": "Thanks, {{patient_first_name}}. Which time works? Reply 1, 2 or 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\nNone work? Tell us what days and times are best.",
-        "filled_length": 178,
+        "text": "Thanks, {{patient_first_name}}. Which time works{{specialty_phrase}}? Reply 1, 2 or 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\nNone work? Tell us what days and times are best.",
+        "filled_length": 212,
         "encoding": "GSM-7",
         "segments": 2
       },
       "es": {
-        "text": "Gracias, {{patient_first_name}}. ¿Qué horario le queda mejor? Responda 1, 2 o 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Díganos qué días y horas le quedan mejor.",
-        "filled_length": 231,
+        "text": "Gracias, {{patient_first_name}}. ¿Qué horario le queda mejor{{specialty_phrase}}? Responda 1, 2 o 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Díganos qué días y horas le quedan mejor.",
+        "filled_length": 264,
         "encoding": "UCS-2",
         "segments": 4,
         "non_gsm_chars": [
@@ -163,40 +165,31 @@
         ]
       },
       "es_gsm_variant": {
-        "text": "Gracias, {{patient_first_name}}. Responda 1, 2 o 3 con el horario que le quede mejor:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Cuéntenos qué fechas y horas le quedan mejor.",
-        "filled_length": 240,
+        "text": "Gracias, {{patient_first_name}}. ¿Qué horario le queda mejor{{specialty_phrase}}? Responda 1, 2 o 3:\n1) {{slot_1}}\n2) {{slot_2}}\n3) {{slot_3}}\n¿Ninguno le sirve? Cuéntenos qué fechas y horas le quedan mejor.",
+        "filled_length": 268,
         "encoding": "GSM-7",
         "segments": 2
       }
     },
     {
       "id": "slot_captured",
-      "purpose": "Patient picked a time. Makes clear it is NOT booked until staff confirm.",
+      "purpose": "Patient picked a time. Makes clear it is NOT booked until staff confirm. Owner review 2026-11-27: wording from the graded test run.",
       "trigger": "captured_slot returned and validated; referral moves to Pending Confirmation",
       "quiet_hours": "Reply held to next allowed window",
       "counts_toward_cap": false,
       "requires_identity_verified": true,
       "en": {
-        "text": "Thank you! We noted {{slot_label}}. This is not booked yet. A staff member will confirm it and text you. Questions? Call {{clinic_phone}}.",
-        "filled_length": 144,
-        "encoding": "GSM-7",
-        "segments": 1
+        "text": "Thank you! We noted {{slot_label}}. Note: this is not booked yet. A staff member will confirm your preference within the schedule, and you will receive a confirmation text shortly."
       },
       "es": {
-        "text": "¡Gracias! Anotamos {{slot_label}}. Todavía no está reservada. Alguien del personal la va a confirmar y le mandará un mensaje. ¿Preguntas? Llame al {{clinic_phone}}.",
-        "filled_length": 178,
-        "encoding": "UCS-2",
-        "segments": 3,
+        "text": "¡Gracias! Anotamos {{slot_label}}. Nota: todavía no está reservada. Alguien del personal confirmará su preferencia en el horario y pronto recibirá un mensaje de confirmación.",
         "non_gsm_chars": [
           "á",
           "í"
         ]
       },
       "es_gsm_variant": {
-        "text": "¡Gracias! Anotamos {{slot_label}}. La cita queda reservada solo cuando el personal la confirme. Le vamos a mandar un mensaje. ¿Preguntas? Llame al {{clinic_phone}}.",
-        "filled_length": 178,
-        "encoding": "GSM-7",
-        "segments": 2
+        "text": "¡Gracias! Anotamos {{slot_label}}. Nota: la cita queda reservada solo cuando el personal confirme su preferencia en el horario. Pronto le vamos a mandar un mensaje para confirmar."
       }
     },
     {
@@ -207,13 +200,13 @@
       "counts_toward_cap": false,
       "requires_identity_verified": true,
       "en": {
-        "text": "{{clinic_name}} (automated message): Your appointment is confirmed for {{appointment_date_time}} at {{location_short}}. Need to change it? Reply here or call {{clinic_phone}}. Reply STOP to opt out.",
+        "text": "Your appointment is confirmed for {{appointment_date_time}} at {{clinic_name}}. We are located at {{clinic_address}}. If you have any questions please call {{clinic_phone}} during regular business hours.",
         "filled_length": 198,
         "encoding": "GSM-7",
         "segments": 2
       },
       "es": {
-        "text": "{{clinic_name}} (mensaje automatizado): Confirmamos su cita para el {{appointment_date_time}} en {{location_short}}. ¿Necesita cambiarla? Responda aquí o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "text": "Confirmamos su cita para el {{appointment_date_time}} en {{clinic_name}}. Estamos en {{clinic_address}}. Si tiene preguntas, llame al {{clinic_phone}} en horario de oficina.",
         "filled_length": 238,
         "encoding": "UCS-2",
         "segments": 4,
@@ -222,7 +215,7 @@
         ]
       },
       "es_gsm_variant": {
-        "text": "{{clinic_name}} (mensaje automatizado): Confirmamos su cita para el {{appointment_date_time}} en {{location_short}}. ¿Necesita cambiarla? Responda a este mensaje o llame al {{clinic_phone}}. Responda ALTO para dejar de recibir mensajes.",
+        "text": "Confirmamos su cita para el {{appointment_date_time}} en {{clinic_name}}. Estamos en {{clinic_address}}. Si tiene preguntas, llame al {{clinic_phone}} en horario de oficina.",
         "filled_length": 248,
         "encoding": "GSM-7",
         "segments": 2
@@ -368,71 +361,53 @@
     },
     {
       "id": "emergency_reply",
-      "purpose": "Medical emergency signal (red tier). Fixed text; the AI never improvises this.",
+      "purpose": "Medical emergency signal (red tier). Fixed text; the AI never improvises this. Owner review 2026-11-27: wording from the graded test run.",
       "trigger": "escalation.tier = red, reason emergency_medical / overdose_poisoning / violence_danger",
       "quiet_hours": "Sent immediately, any hour",
       "counts_toward_cap": false,
       "requires_identity_verified": false,
       "en": {
-        "text": "This sounds like it could be an emergency. Please call 911 now or go to the nearest emergency room. I'm an automated assistant and can't help with this, but I am alerting our staff.",
-        "filled_length": 181,
-        "encoding": "GSM-7",
-        "segments": 2
+        "text": "For all emergencies, please call 911 or go to the nearest emergency room."
       },
       "es": {
-        "text": "Esto puede ser una emergencia. Por favor llame al 911 ahora o vaya a la sala de emergencias más cercana. Soy un asistente automatizado y no puedo ayudarle con esto, pero le voy a avisar al personal.",
-        "filled_length": 198,
-        "encoding": "UCS-2",
-        "segments": 3,
+        "text": "Para cualquier emergencia, llame al 911 o vaya a la sala de emergencias más cercana.",
         "non_gsm_chars": [
           "á"
         ]
       },
       "es_gsm_variant": {
-        "text": "Esto puede ser una emergencia. Por favor llame al 911 ahora o vaya a la sala de emergencias del hospital. Soy un asistente automatizado y no puedo ayudarle con esto, pero le voy a avisar al personal.",
-        "filled_length": 199,
-        "encoding": "GSM-7",
-        "segments": 2
+        "text": "Para cualquier emergencia, llame al 911 o vaya a la sala de emergencias del hospital."
       }
     },
     {
       "id": "crisis_reply",
-      "purpose": "Suicidal thoughts / self-harm signal (red tier). Fixed text.",
+      "purpose": "Suicidal thoughts / self-harm signal (red tier). Fixed text. Owner review 2026-11-27: wording from the graded test run.",
       "trigger": "escalation.tier = red, reason suicide_self_harm",
       "quiet_hours": "Sent immediately, any hour",
       "counts_toward_cap": false,
       "requires_identity_verified": false,
       "en": {
-        "text": "You matter, and help is available right now. Call or text 988 (Suicide & Crisis Lifeline), free, 24/7. If you are in danger, call 911. I'm an automated assistant, and I am alerting our staff.",
-        "filled_length": 191,
-        "encoding": "GSM-7",
-        "segments": 2
+        "text": "Help is available right now and you matter. Call or text 988 (Suicide & Crisis Lifeline), free, 24/7. If you are in danger, call 911."
       },
       "es": {
-        "text": "Usted es importante y hay ayuda ahora mismo. Llame al 988 y marque 2 para español, o mande AYUDA por texto al 988. Es gratis, 24 horas. Si corre peligro, llame al 911. Soy un asistente automatizado y le voy a avisar al personal.",
-        "filled_length": 228,
-        "encoding": "GSM-7",
-        "segments": 2
+        "text": "Hay ayuda ahora mismo y usted es importante. Llame al 988 y marque 2 para español, o mande AYUDA por texto al 988. Es gratis, 24 horas. Si corre peligro, llame al 911."
       }
     },
     {
       "id": "human_handoff",
-      "purpose": "Amber tier: patient wants a person, is confused or upset, has a complaint, or asks clinical/cost/insurance questions.",
+      "purpose": "Amber tier: patient wants a person, is confused or upset, has a complaint, or asks clinical/cost/insurance questions. Owner review 2026-11-27: wording from the graded test run.",
       "trigger": "escalation.tier = amber",
       "quiet_hours": "Amber item created immediately; reply held to next allowed window",
       "counts_toward_cap": false,
       "requires_identity_verified": false,
       "en": {
-        "text": "Got it. I'm an automated assistant, so I'm asking a staff member to contact you. You can also call {{clinic_phone}} during office hours.",
-        "filled_length": 134,
-        "encoding": "GSM-7",
-        "segments": 1
+        "text": "You can also schedule an appointment by calling the clinic during normal office hours at {{clinic_phone}}."
       },
       "es": {
-        "text": "Entendido. Como soy un asistente automatizado, le pediré a alguien del personal que se comunique con usted. También puede llamar al {{clinic_phone}} en horario de oficina.",
-        "filled_length": 169,
-        "encoding": "GSM-7",
-        "segments": 2
+        "text": "También puede hacer una cita llamando a la clínica en horario de oficina al {{clinic_phone}}."
+      },
+      "es_gsm_variant": {
+        "text": "Si prefiere, llame al {{clinic_phone}} en horario de oficina para hacer una cita."
       }
     }
   ]

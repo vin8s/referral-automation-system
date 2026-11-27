@@ -57,7 +57,10 @@ export class AwsSmsProvider implements SmsProvider {
     if (!this.client) {
       this.client = import('@aws-sdk/client-pinpoint-sms-voice-v2').then(
         ({ PinpointSMSVoiceV2Client }) => new PinpointSMSVoiceV2Client({ region: process.env.AWS_REGION }),
-      );
+      ).catch(err => {
+        this.client = null; // don't cache a failed load: every later send would fail with it
+        throw err;
+      });
     }
     return this.client;
   }

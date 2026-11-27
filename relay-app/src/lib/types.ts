@@ -57,6 +57,8 @@ export interface CapturedSlot {
   time: string;
   provider: string;
   capturedAgoMin: number | null;
+  /** Epic sandbox prototype: this time came from Epic $find. */
+  epic?: boolean;
 }
 
 export interface BookedAppointment {
@@ -66,6 +68,8 @@ export interface BookedAppointment {
   confirmedBy: string;
   confirmedAt: string;
   mirrorStatus: 'mirrored' | 'pending' | 'failed';
+  /** Epic sandbox prototype: the appointment Relay booked in Epic. */
+  epicAppointmentId?: string;
 }
 
 export interface Patient {
@@ -91,6 +95,8 @@ export interface Referral {
   id: string;
   patient: Patient;
   reason: string;
+  /** Appointment specialty (e.g. "Primary care"). Texted only after DOB verification. */
+  specialty?: string;
   referringProvider: string;
   referralSource: string;
   referralTime: string;
@@ -120,6 +126,8 @@ export interface ConfirmQueueItem {
   summary: string;
   /** Last few SMS messages of the thread. */
   smsExcerpt?: SmsMessage[];
+  /** Epic sandbox prototype: Confirm will book this slot in Epic ($book). */
+  epicBooking?: boolean;
 }
 
 /** Red Escalated referral (safety). Never merged with amber NeedsHumanItem. */
@@ -167,6 +175,8 @@ export interface CalendarEvent {
   state: ReferralState;
   mirrorStatus: 'mirrored' | 'pending' | 'failed';
   isShadow: boolean;
+  /** Epic sandbox prototype: booked in Epic by Relay after the MA confirmed. */
+  bookedInEpic?: boolean;
 }
 
 export interface PipelineCount {
@@ -290,6 +300,8 @@ export interface SmsThread {
 
 export interface OutreachSettings {
   textingPaused: boolean;
+  /** Pilot mode: staff approve each referral (dashboard "Ready to text") before its first text. */
+  approvalRequired: boolean;
   quietStart: string;
   quietEnd: string;
   allowedDays: number[];
@@ -306,10 +318,28 @@ export interface OutreachSettingsView {
   provider: 'mock' | 'aws' | 'twilio';
   aiProvider: 'mock' | 'bedrock';
   timezone: string;
-  /** Development only: show the "Run outreach now" button. */
+  /** True outside production (development-only tools such as the patient simulator). */
   devTools: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
+}
+
+/** A referral waiting for staff approval before its first text (pilot mode). */
+export interface ReadyToTextItem {
+  referralId: string;
+  patient: string;
+  phone: string;
+  language: string;
+  specialty: string;
+  priority: Priority;
+  receivedAt: string;
+  /** null = can be texted once approved; otherwise why it can't be texted yet. */
+  blocked: string | null;
+}
+
+export interface ReadyToTextView {
+  approvalRequired: boolean;
+  items: ReadyToTextItem[];
 }
 
 export interface OutreachTickResult {
@@ -434,3 +464,45 @@ export interface EcwImportOverview {
 }
 
 export interface EcwImportDetail { summary: EcwImportSummary; review: EcwReviewItem[] }
+
+// ── Epic sandbox prototype (docs/EPIC_PROTOTYPE_PLAN.md) ────────────────────
+
+/** One entry of the simulated Epic referral feed (Settings → Epic sandbox). */
+export interface EpicFeedPatient {
+  /** Epic sandbox Patient FHIR ID */
+  fhirId: string;
+  /** Epic visit-type code used to find slots (sandbox: '95014') */
+  visitType: string;
+  specialty: string | null;
+}
+
+export type EpicSyncOutcome = 'imported' | 'already_open' | 'error';
+
+/** Result of one "Sync from Epic" run (also stored as the last sync result). */
+export interface EpicSyncResult {
+  /** New referrals created */
+  imported: number;
+  /** Relay patients already linked to Epic whose details changed */
+  updated: number;
+  /** Patients that already had an open referral (no new referral created) */
+  alreadyOpen: number;
+  errors: { fhirId: string; error: string }[];
+  /** 'epic-sandbox' or 'fake' */
+  connector: string;
+  /** ISO time the sync finished */
+  at: string;
+  items: { fhirId: string; outcome: EpicSyncOutcome; patient: string | null; referralId: string | null; detailsUpdated: boolean }[];
+}
+
+export interface EpicSettingsView {
+  settings: {
+    /** "Book into Epic (sandbox)": the MA's Confirm books in the Epic sandbox. Off by default. */
+    bookingEnabled: boolean;
+    patients: EpicFeedPatient[];
+    lastSyncAt: string | null;
+    lastSyncResult: EpicSyncResult | null;
+    updatedAt: string | null;
+    updatedBy: string | null;
+  };
+  connector: string;
+}

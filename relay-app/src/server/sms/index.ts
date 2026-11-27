@@ -5,7 +5,8 @@ import 'server-only';
 import { getDb } from '@/server/db';
 import { getOrg, getRawSettings } from '@/server/staticData';
 import type {
-  ConfirmQueueItem, NeedsHumanItem, OutreachSettings, OutreachSettingsView, SmsChannelPreference, SmsMessage, SmsThread,
+  ConfirmQueueItem, NeedsHumanItem, OutreachSettings, OutreachSettingsView, Priority, ReadyToTextItem, ReadyToTextView,
+  SmsChannelPreference, SmsMessage, SmsThread,
 } from '@/lib/types';
 import type { SessionUser } from '@/lib/auth-types';
 import {
@@ -16,16 +17,20 @@ import { runOutreachTick } from './outreach';
 import { getSmsProvider, smsProviderName } from './provider';
 import * as repo from './repo';
 import { staffActor } from './repo';
-import { clinicTimeZone, DEFAULT_OUTREACH_SETTINGS } from './schedule';
-import { OUTREACH_STEPS } from './templates';
+import { ageOn, clinicTimeZone, DEFAULT_OUTREACH_SETTINGS } from './schedule';
+import { DEFAULT_CLINIC_ADDRESS, OUTREACH_STEPS } from './templates';
 
 export { SmsActionError };
 
 export function clinicDisplayName(): string {
-  return process.env.CLINIC_DISPLAY_NAME || 'Community Health Clinic';
+  return process.env.CLINIC_DISPLAY_NAME || 'Rhode Island Free Clinic';
 }
 export function clinicPhoneNumber(): string {
-  return process.env.CLINIC_PHONE_NUMBER || '(555) 555-0123';
+  return process.env.CLINIC_PHONE_NUMBER || '(401) 274-6347';
+}
+
+export function clinicAddress(): string {
+  return process.env.CLINIC_ADDRESS || DEFAULT_CLINIC_ADDRESS;
 }
 
 export async function smsDeps(): Promise<SmsDeps> {
@@ -38,6 +43,7 @@ export async function smsDeps(): Promise<SmsDeps> {
     tz: clinicTimeZone(),
     clinicName: clinicDisplayName(),
     clinicPhone: clinicPhoneNumber(),
+    clinicAddress: clinicAddress(),
     providers: raw.practiceProfile.providers,
     specialty: getOrg().specialty,
   };
@@ -55,7 +61,7 @@ export const REASON_LABELS: Record<string, string> = {
   no_slot_works: 'No offered time works', appointment_change: 'Wants to change appointment',
   off_topic_repeated: 'Off-topic / abusive', agent_error: 'AI error — nothing sent',
   cadence_exhausted: 'No reply after final text', urgent_referral: 'Urgent referral — call today',
-  opted_back_in: 'Opted back in (START)',
+  opted_back_in: 'Opted back in (START)', patient_replied_paused: 'Texted while texting was paused',
   ecw_no_show: 'No show in eCW — call first', ecw_rescheduled: 'Rescheduled in eCW — check new time',
   ecw_cancelled: 'Cancelled in eCW — call patient',
 };
@@ -161,8 +167,30 @@ export async function simulatePatientText(referralId: string, body: string, user
   return handleInbound(d, { from: ref.phone, body: text, referralId, provider: 'mock' });
 }
 
+/** Stand-ins used when the real model / provider can't be built (misconfiguration): every use throws. */
+const brokenModel = (err: unknown): SmsDeps['model'] => ({ name: 'scripted', turn: async () => { throw err; } });
+const brokenProvider = (err: unknown): SmsDeps['provider'] => ({ name: smsProviderName(), send: async () => { throw err; } });
+
 export async function receiveInboundSms(input: { from: string; body: string; providerMessageId?: string | null; provider?: 'aws' | 'twilio' }) {
-  return handleInbound(await smsDeps(), { ...input, provider: input.provider ?? 'aws' });
+  // smsDeps() throws when AI_PROVIDER / SMS_PROVIDER is misconfigured. That used to fail the
+  // webhook before the text was even stored: SNS retried a few times and the text was lost.
+  // Now the text is stored and the engine's own fail-safes raise an amber item instead.
+  // (A database that can't be reached still throws, so SNS retries.)
+  const raw = getRawSettings();
+  let model: SmsDeps['model'];
+  let provider: SmsDeps['provider'];
+  try { model = getSmsAgentModel(); } catch (err) { logInboundSetup('model', err); model = brokenModel(err); }
+  try { provider = getSmsProvider(); } catch (err) { logInboundSetup('provider', err); provider = brokenProvider(err); }
+  const d: SmsDeps = {
+    db: await getDb(), provider, model, now: () => new Date(), tz: clinicTimeZone(),
+    clinicName: clinicDisplayName(), clinicPhone: clinicPhoneNumber(), clinicAddress: clinicAddress(),
+    providers: raw.practiceProfile.providers, specialty: getOrg().specialty,
+  };
+  return handleInbound(d, { ...input, provider: input.provider ?? 'aws' });
+}
+
+function logInboundSetup(what: string, err: unknown) { // never logs the body or the number
+  void import('@/server/log').then(({ logError }) => logError(`inbound sms ${what} setup`, err));
 }
 
 export async function listNeedsHuman(): Promise<NeedsHumanItem[]> {
@@ -205,6 +233,7 @@ export function sanitizeOutreachSettings(raw: unknown): OutreachSettings {
   if (quietEnd <= quietStart) { quietStart = d.quietStart; quietEnd = d.quietEnd; }
   return {
     textingPaused: typeof r.textingPaused === 'boolean' ? r.textingPaused : false,
+    approvalRequired: typeof r.approvalRequired === 'boolean' ? r.approvalRequired : d.approvalRequired,
     quietStart, quietEnd,
     allowedDays: days.filter(x => x !== 0).length ? days.filter(x => x !== 0) : d.allowedDays, // never Sundays (R7.1)
     holidays: Array.isArray(r.holidays) ? (r.holidays.filter(x => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x)) as string[]) : [],
@@ -221,6 +250,11 @@ export async function saveOutreachSettings(raw: unknown, user: SessionUser): Pro
   const before = await repo.loadOutreachSettings(db);
   const s = sanitizeOutreachSettings(raw);
   await repo.saveOutreachSettings(db, s, user.name);
+  if (before.approvalRequired !== s.approvalRequired) {
+    await repo.audit(db, staffActor(user), null, 'sms.approval_mode', s.approvalRequired
+      ? 'Pilot mode ON: staff approve each referral before its first text'
+      : 'Pilot mode OFF: first texts go out automatically');
+  }
   if (before.textingPaused !== s.textingPaused) {
     await repo.audit(db, staffActor(user), null, 'sms.kill_switch', s.textingPaused ? 'PAUSED all texting (kill switch)' : 'Resumed texting (kill switch off)');
   }
@@ -228,10 +262,32 @@ export async function saveOutreachSettings(raw: unknown, user: SessionUser): Pro
   return getOutreachSettingsView();
 }
 
+const outreachQueue = globalThis as unknown as { __relayOutreachChain?: Promise<unknown> };
+
+/**
+ * Runs one outreach tick. Runs are serialized in this server process (the import
+ * trigger, the automatic timer and the scheduler endpoint can overlap), so two
+ * ticks never read the same "not texted yet" state and text a patient twice.
+ */
 export async function runOutreachNow(now?: Date) {
-  const d = await smsDeps();
-  if (now) d.now = () => now;
-  return runOutreachTick(d);
+  const run = async () => {
+    const d = await smsDeps();
+    if (now) d.now = () => now;
+    return runOutreachTick(d);
+  };
+  const next = (outreachQueue.__relayOutreachChain ?? Promise.resolve()).catch(() => undefined).then(run);
+  outreachQueue.__relayOutreachChain = next.catch(() => undefined);
+  return next;
+}
+
+/** Fire-and-forget outreach run (e.g. right after referrals are imported). Never throws. */
+export async function runOutreachSoon(reason: string): Promise<void> {
+  try {
+    await runOutreachNow();
+  } catch (err) {
+    const { logError } = await import('@/server/log');
+    logError(`outreach run (${reason})`, err);
+  }
 }
 
 // ── MA confirm queue hooks ──────────────────────────────────────────────────
@@ -275,4 +331,66 @@ export async function withSmsExcerpts(items: ConfirmQueueItem[]): Promise<Confir
     const msgs = (await repo.listMessages(db, item.referralId, { limit: 6 })).filter(m => m.status !== 'suppressed');
     return { ...item, smsExcerpt: msgs.map(toMessage) };
   }));
+}
+
+// ── Pilot mode: "Ready to text" (staff approve each referral's first text) ──
+
+/** Why a referral can't be texted yet, using the same rules as the outreach scheduler. */
+function blockedReason(ref: repo.RefCtx, conv: repo.Conv | null, now: Date, tz: string): string | null {
+  if (ref.optedOut) return 'Opted out of texts';
+  if (!ref.phone) return 'No mobile number';
+  if (conv?.numberSuppressed) return 'Reported wrong number';
+  if (conv && conv.channelPreference !== 'sms') return 'Texting turned off for this referral';
+  if (conv?.paused) return 'Texting paused for this referral';
+  if (ref.dobIso && ageOn(ref.dobIso, now, tz) < 18) return 'Under 18: call the family';
+  if (!repo.langFromPatient(ref.language)) return `Language (${ref.language}): call with an interpreter`;
+  return null;
+}
+
+export async function listReadyToText(): Promise<ReadyToTextView> {
+  const db = await getDb();
+  const settings = await repo.loadOutreachSettings(db);
+  if (!settings.approvalRequired) return { approvalRequired: false, items: [] };
+  const now = new Date();
+  const tz = clinicTimeZone();
+  const items: ReadyToTextItem[] = [];
+  for (const ref of await repo.listAwaitingApproval(db)) {
+    const conv = await repo.findConv(db, ref.id);
+    items.push({
+      referralId: ref.id, patient: ref.patientName, phone: ref.phone, language: ref.language,
+      specialty: ref.specialty, priority: ref.priority as Priority,
+      receivedAt: fmt(ref.referralTime) ?? '', blocked: blockedReason(ref, conv, now, tz),
+    });
+  }
+  return { approvalRequired: true, items };
+}
+
+/**
+ * Staff approve referrals for their first text. Only referrals that can be texted
+ * right now are approved; the rest are reported back. Outreach then runs by itself.
+ */
+export async function approveForTexting(
+  ids: unknown, user: SessionUser,
+): Promise<{ approved: string[]; notApproved: { referralId: string; reason: string }[] }> {
+  const wanted = Array.isArray(ids)
+    ? [...new Set(ids.filter((x): x is string => typeof x === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(x)))].slice(0, 500)
+    : [];
+  const db = await getDb();
+  const now = new Date();
+  const tz = clinicTimeZone();
+  const waiting = new Map((await repo.listAwaitingApproval(db)).map(r => [r.id, r]));
+  const ok: string[] = [];
+  const notApproved: { referralId: string; reason: string }[] = [];
+  for (const id of wanted) {
+    const ref = waiting.get(id);
+    if (!ref) { notApproved.push({ referralId: id, reason: 'Not waiting for approval' }); continue; }
+    const why = blockedReason(ref, await repo.findConv(db, id), now, tz);
+    if (why) notApproved.push({ referralId: id, reason: why });
+    else ok.push(id);
+  }
+  const approved = await repo.approveOutreach(db, ok, user.name, now);
+  for (const id of approved) {
+    await repo.audit(db, staffActor(user), id, 'sms.approved', 'Approved for texting (pilot mode); first text goes out in the next sending window');
+  }
+  return { approved, notApproved };
 }

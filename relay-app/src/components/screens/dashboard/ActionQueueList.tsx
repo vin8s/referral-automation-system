@@ -18,11 +18,13 @@ function ConfirmModal({
   onConfirm,
   onCancel,
   loading,
+  error,
 }: {
   item: ConfirmQueueItem;
   onConfirm: () => void;
   onCancel: () => void;
   loading: boolean;
+  error?: string | null;
 }) {
   return (
     <div
@@ -88,8 +90,15 @@ function ConfirmModal({
         <div style={{ fontSize: 12.5, color: 'var(--relay-ink-3)', marginBottom: 20, lineHeight: 1.6 }}>
           Confirming will move this referral to <strong style={{ color: 'var(--relay-ink-2)' }}>Booked</strong>,
           update the referrals list and calendar, and mark it as mirrored to the shadow calendar.{' '}
-          <span style={{ color: 'var(--relay-ink-4)' }}>(prototype — no write to practice system)</span>
+          {item.epicBooking
+            ? <strong style={{ color: 'var(--relay-ink-2)' }}>Epic sandbox (prototype): this books the time in the Epic sandbox first.</strong>
+            : <span style={{ color: 'var(--relay-ink-4)' }}>(prototype — no write to practice system)</span>}
         </div>
+        {error && (
+          <div role="alert" style={{ marginBottom: 16, fontSize: 12.5, color: 'var(--relay-urgent-700)', background: 'var(--relay-urgent-50)', border: '1px solid var(--relay-urgent-200)', borderRadius: 8, padding: '8px 12px' }}>
+            {error}
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -116,6 +125,7 @@ export function ActionQueueList({ items: incoming, compact, onConfirmed }: Actio
   const [items, setItems] = useState<ConfirmQueueItem[]>(incoming);
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmQueueItem | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   // Sync when parent loads async data (useState only captures initial value)
   useEffect(() => {
@@ -125,10 +135,17 @@ export function ActionQueueList({ items: incoming, compact, onConfirmed }: Actio
   async function handleConfirmAccepted() {
     if (!pendingConfirm) return;
     setConfirming(true);
-    await confirmSlot(pendingConfirm.referralId);
+    setConfirmError(null);
+    const res = await confirmSlot(pendingConfirm.referralId);
+    setConfirming(false);
+    if (!res.success && res.code !== 'slot_unavailable') {
+      setConfirmError(res.error ?? res.errorMsg ?? 'Could not confirm this slot. Try again.');
+      return;
+    }
+    // Epic sandbox prototype: a taken slot was released and new times are offered by text.
+    if (res.code === 'slot_unavailable') window.alert(res.error ?? 'That time is no longer open in Epic. New times will be offered by text.');
     setItems(prev => prev.filter(i => i.referralId !== pendingConfirm.referralId));
     setPendingConfirm(null);
-    setConfirming(false);
     onConfirmed?.();
   }
 
@@ -169,8 +186,9 @@ export function ActionQueueList({ items: incoming, compact, onConfirmed }: Actio
         <ConfirmModal
           item={pendingConfirm}
           onConfirm={handleConfirmAccepted}
-          onCancel={() => !confirming && setPendingConfirm(null)}
+          onCancel={() => { if (!confirming) { setPendingConfirm(null); setConfirmError(null); } }}
           loading={confirming}
+          error={confirmError}
         />
       )}
 

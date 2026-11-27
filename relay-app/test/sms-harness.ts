@@ -61,13 +61,14 @@ export async function testDb(): Promise<Db> {
   const db = await sharedDb;
   await db.query(`truncate audit_log, appointments, call_attempts, messages, sms_conversations, needs_human_items,
     sms_inbound_events, referrals, patients cascade`);
-  await db.query(`update sms_settings set texting_paused = false`);
+  await db.query(`update sms_settings set texting_paused = false, approval_required = false`);
+  await db.query(`update epic_settings set booking_enabled = false, patients = '[]'::jsonb, last_sync_at = null, last_sync_result = null`);
   return db;
 }
 
 export interface FakePatient {
   referralId?: string; name?: string; dob?: string | null; phone?: string; language?: string;
-  consent?: boolean; state?: string; priority?: string; reason?: string;
+  consent?: boolean; state?: string; priority?: string; reason?: string; specialty?: string;
 }
 
 export async function addReferral(db: Db, p: FakePatient = {}): Promise<string> {
@@ -77,9 +78,9 @@ export async function addReferral(db: Db, p: FakePatient = {}): Promise<string> 
     [p.name ?? 'Grace Testpatient', p.dob === undefined ? '1980-03-04' : p.dob, p.phone ?? '+14155550199',
       p.language ?? 'English', p.consent ?? true]);
   await db.query(
-    `insert into referrals (id, patient_id, reason, referring_provider, location, priority, state)
-     values ($1, $2, $3, 'Dr. Example', 'Main St. office', $4, $5)`,
-    [id, rows[0].id, p.reason ?? 'Arrhythmia evaluation', p.priority ?? 'normal', p.state ?? 'Queued']);
+    `insert into referrals (id, patient_id, reason, referring_provider, location, priority, state, specialty)
+     values ($1, $2, $3, 'Dr. Example', 'Main St. office', $4, $5, $6)`,
+    [id, rows[0].id, p.reason ?? 'Arrhythmia evaluation', p.priority ?? 'normal', p.state ?? 'Queued', p.specialty ?? null]);
   return id;
 }
 

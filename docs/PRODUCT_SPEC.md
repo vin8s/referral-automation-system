@@ -50,6 +50,14 @@ The product is **two modes that share one engine.** The MVP ships Connector mode
 - Bidirectional sync and conflict-precedence engine
 - Epic / EHR write integration
 
+### Exception — native booking: sandbox prototype only (owner decision 2026-11-16)
+A prototype of Epic write integration is **in scope for the Epic FHIR sandbox only**, behind the admin setting **"Book into Epic (sandbox)"** (off by default; off = pure connector mode):
+- **Human in the loop:** the patient picks a time by text → the MA clicks **Confirm** → Relay calls Epic `Appointment.$book` for a slot returned by `Appointment.$find`, then records the appointment on Relay's Calendar. The AI never books on its own.
+- **Sandbox only:** synthetic Epic test patients; never a real clinic, real patient data or production Epic.
+- **Referral feed is simulated:** Epic has no referral-search API, so patients enter via a manual **"Sync from Epic"** button from an admin-configured list of sandbox patient IDs.
+- No cancel/reschedule write-back (Epic FHIR has none); those become staff tasks.
+Detail and phases: `docs/EPIC_PROTOTYPE_PLAN.md`. Everything in the OUT list above remains out of scope for real clinics.
+
 > **Scope-creep guard:** "native calendar running in the background" means a **read-only mirror**, not a hidden full parallel operational system. The single biggest risk to this MVP is the shadow calendar quietly growing into the native product. Keep the mirror minimal.
 
 ---

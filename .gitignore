@@ -24,3 +24,10 @@ relay-app/next-env.d.ts
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Private local details (AWS account IDs, phone numbers) — never commit
+docs/private/
+*.private.md
+
+# CDK lookup cache (contains the AWS account ID)
+infra/cdk.context.json

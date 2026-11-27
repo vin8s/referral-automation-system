@@ -71,13 +71,15 @@ async function insertAll(tx: Queryable): Promise<void> {
 
     await tx.query(
       `insert into referrals (id, patient_id, reason, referring_provider, referral_source, referral_time,
-         location, priority, state, escalation_reason, escalation_severity, escalation_raised_at, escalation_owner)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+         location, priority, state, escalation_reason, escalation_severity, escalation_raised_at, escalation_owner,
+         specialty)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         r.id, patientId, r.reason, r.referringProvider, r.referralSource, referralTime,
         r.location, r.priority, r.state,
         r.escalation?.reason ?? null, r.escalation?.severity ?? null,
         r.escalation ? mockTimeToIso(r.escalation.raisedAt) : null, r.escalation?.owner ?? null,
+        r.specialty ?? 'Primary care',
       ],
     );
 
@@ -137,6 +139,16 @@ async function insertAll(tx: Queryable): Promise<void> {
   // locally. Real patients start with consent = false (002_sms.sql) until staff record it.
   await tx.query(
     `update patients set sms_consent = true, sms_consent_at = now(), sms_consent_source = 'seed (fake data)'`);
+}
+
+/**
+ * Whether `npm run dev` should load the fake referrals/patients into an empty database.
+ * Off unless SEED_FAKE_DATA=true (the app starts empty); never in production.
+ * Tests and `npm run db:seed` call seedIfEmpty() directly instead (explicit opt-in).
+ */
+export function fakeSeedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.NODE_ENV === 'production') return false;
+  return ['true', '1', 'yes'].includes((env.SEED_FAKE_DATA ?? '').trim().toLowerCase());
 }
 
 /** Inserts the fake seed data. Returns false (and does nothing) if referrals already exist. */

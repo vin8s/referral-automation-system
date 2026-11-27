@@ -1,5 +1,6 @@
 // Next.js 16 Proxy (formerly "middleware"): first line of defense.
-// Signed-out requests: pages → redirect to /login, /api/* → 401 JSON.
+// Signed-out requests: pages → the clinic sign-in page (Cognito) or /login (mock / not set up),
+// /api/* → 401 JSON.
 // Expired sessions: pages → /login?reason=idle|absolute, /api/* → 401 { code: 'session_expired' }.
 // Active sessions: the cookie is re-signed now and then so the idle timer slides forward.
 // Route handlers and the app layout re-check the session themselves, so this is
@@ -10,6 +11,8 @@ import {
   SESSION_COOKIE, checkSession, sessionCookieOptions, shouldRenew, signSession, type SessionCheck,
 } from '@/server/auth/session';
 import { isCrossSiteWrite } from '@/server/auth/csrf';
+import { authMode } from '@/server/auth/config';
+import { signedOutDestination } from '@/server/auth/redirect';
 
 // Public paths authenticate themselves:
 //   /api/sms/inbound        — SNS signature + topic check (AWS End User Messaging inbound SMS)
@@ -63,10 +66,12 @@ export async function proxy(request: NextRequest) {
       { status: 401 },
     );
   } else {
-    const login = new URL('/login', request.url);
-    if (pathname !== '/') login.searchParams.set('next', pathname + search);
-    if (expired) login.searchParams.set('reason', expired);
-    res = NextResponse.redirect(login);
+    // Signed out → straight to the clinic sign-in page (Cognito); expired → Relay's /login,
+    // which explains why. Sign-in not set up → /login shows the problem instead of looping.
+    let cognito = false;
+    try { cognito = authMode() === 'cognito'; } catch { /* misconfigured: /login explains */ }
+    const dest = signedOutDestination({ cognito, next: pathname === '/' ? null : pathname + search, expired });
+    res = NextResponse.redirect(new URL(dest, request.url));
   }
   if (check.status !== 'none') res.cookies.delete(SESSION_COOKIE); // expired or tampered: drop it
   return res;

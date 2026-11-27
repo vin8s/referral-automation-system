@@ -69,7 +69,7 @@ Step-by-step: **`docs/AWS_DEPLOYMENT_GUIDE.md`** Parts 1–4.
 |---|---|---|
 | ⬜ | Create the AWS account under the chosen owner | Choose the **Paid plan** (the Free plan auto-closes after 6 months). Turn on MFA for the root user |
 | ⬜ | Create an admin user for daily use | IAM Identity Center with MFA. Never use the root user day to day |
-| ✅ | Accept the **AWS BAA** in AWS Artifact | Done 2026-11-13: AWS Organizations BAA, Active on Relay-Clinic-Test (000755994402) |
+| ✅ | Accept the **AWS BAA** in AWS Artifact | Done 2026-11-13: AWS Organizations BAA, Active on Relay-Clinic-Test (see `docs/private/AWS_PRIVATE_IDS.md`) |
 | ⬜ | Set **billing alarms** | $50 and $100/month budgets are created automatically by the deploy (`infra/`) |
 | ⬜ | Apply for nonprofit or startup credits | |
 | ⬜ | Turn on Bedrock access for Claude | Submit the one-time Anthropic use-case form in the Bedrock console |

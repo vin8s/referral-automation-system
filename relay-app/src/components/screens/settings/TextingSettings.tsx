@@ -11,12 +11,12 @@ import type { OutreachSettings, OutreachSettingsView } from '@/lib/types';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-const inputStyle: React.CSSProperties = {
+export const inputStyle: React.CSSProperties = {
   background: 'var(--relay-surface)', border: '1px solid var(--relay-hairline)', borderRadius: 6,
   padding: '5px 9px', font: 'inherit', fontSize: 13, color: 'var(--relay-ink)', outline: 'none',
 };
 
-function Row({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
+export function Row({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, padding: '14px 0', borderBottom: '1px solid var(--relay-hairline)' }}>
       <div style={{ flex: 1 }}>
@@ -88,6 +88,24 @@ export function TextingSettings() {
             <Icon name={paused ? 'play' : 'pause'} size={13} /> {paused ? 'Resume texting' : 'Pause all texting'}
           </button>
         </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><h3>New referrals</h3></div>
+        <Row
+          label="Staff approval before the first text (pilot mode)"
+          sub={s.approvalRequired
+            ? 'On: new referrals wait in Ready to text on the Dashboard until a staff member approves them. Follow-ups after the first text are automatic.'
+            : 'Off: referrals with SMS consent get their first text automatically in the next sending window.'}
+        >
+          <button
+            className="btn btn-sm" disabled={disabled}
+            style={s.approvalRequired ? { background: 'var(--relay-accent-50)', borderColor: 'var(--relay-accent)', color: 'var(--relay-accent-700)' } : undefined}
+            onClick={() => save({ ...s, approvalRequired: !s.approvalRequired }, s.approvalRequired ? 'Pilot mode off: first texts are automatic.' : 'Pilot mode on: staff approve each first text.')}
+          >
+            {s.approvalRequired ? 'On' : 'Off'}
+          </button>
+        </Row>
       </div>
 
       <div className="card">

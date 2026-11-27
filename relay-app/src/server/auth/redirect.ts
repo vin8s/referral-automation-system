@@ -9,6 +9,28 @@ const BASE = 'http://relay.invalid';
 const UNSAFE_CHARS = /[\u0000-\u001f\u007f\\]/;
 
 /**
+ * Where a signed-out request for a page goes (owner decision 2026-11-27, "option 8").
+ *  - Cognito, no session: straight to the clinic sign-in page (/api/auth/login starts it),
+ *    so staff never see an extra Relay screen before typing their password.
+ *  - Expired session, mock login, or sign-in not set up: Relay's /login page, which explains
+ *    what happened ("signed out after inactivity", the test-user picker, a setup problem).
+ * `next` is the page they asked for; it is checked again by safeNext() after sign-in.
+ */
+export function signedOutDestination(opts: {
+  cognito: boolean; next: string | null; expired: 'idle' | 'absolute' | null;
+}): string {
+  const p = new URLSearchParams();
+  if (opts.next && opts.next !== '/') p.set('next', opts.next);
+  if (opts.cognito && !opts.expired) {
+    const s = p.toString();
+    return `/api/auth/login${s ? `?${s}` : ''}`;
+  }
+  if (opts.expired) p.set('reason', opts.expired);
+  const s = p.toString();
+  return `/login${s ? `?${s}` : ''}`;
+}
+
+/**
  * Returns a same-site relative path that is safe to redirect to after sign-in,
  * or DEFAULT_AFTER_LOGIN. Rejects absolute URLs, protocol-relative URLs ("//x"),
  * backslash tricks, control characters, and the auth pages themselves (loops).

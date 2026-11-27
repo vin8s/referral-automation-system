@@ -10,7 +10,7 @@ import * as oidc from 'openid-client';
 import { appUrl } from './config';
 import type { Role, SessionUser } from '@/lib/auth-types';
 
-const g = globalThis as unknown as { __relayOidc?: Promise<oidc.Configuration> };
+const g = globalThis as unknown as { __relayOidc?: Promise<oidc.Configuration>; __relayOidcLib?: unknown };
 
 /** A local http:// issuer (e.g. a fake OIDC server) is allowed in development only. */
 function isDevLocalIssuer(issuer: URL): boolean {
@@ -19,6 +19,13 @@ function isDevLocalIssuer(issuer: URL): boolean {
 }
 
 function getConfig(): Promise<oidc.Configuration> {
+  // Dev hot-reload can load a fresh copy of openid-client while the cached Configuration still
+  // belongs to the old copy; the library then rejects it ("instanceof Configuration" check,
+  // ERR_INVALID_ARG_TYPE) and every sign-in fails. Rebuild when the copy changed.
+  if (g.__relayOidcLib !== oidc.Configuration) {
+    g.__relayOidc = undefined;
+    g.__relayOidcLib = oidc.Configuration;
+  }
   if (!g.__relayOidc) {
     const issuer = new URL(process.env.COGNITO_ISSUER!);
     const clientId = process.env.COGNITO_CLIENT_ID!;

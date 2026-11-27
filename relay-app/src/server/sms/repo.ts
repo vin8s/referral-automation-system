@@ -29,7 +29,10 @@ export interface RefCtx {
   id: string;
   state: string;
   priority: string;
+  /** Clinical detail. NEVER texted and NEVER sent to the model (outbound guard only). */
   reason: string;
+  /** Appointment specialty. Texted only in slot_offer after identity is verified; never sent to the model. */
+  specialty: string;
   referringProvider: string;
   location: string;
   patientId: string;
@@ -45,29 +48,33 @@ export interface RefCtx {
   optedOutAt: Date | null;
   optOutSource: string | null;
   escalationReason: string | null;
+  /** Pilot mode: when staff approved the first text (null = not approved). */
+  outreachApprovedAt: Date | null;
 }
 
 const REF_SQL = `
-  select r.id, r.state, r.priority, coalesce(r.reason,'') as reason, coalesce(r.referring_provider,'') as referring_provider,
-         r.location, r.patient_id, r.escalation_reason,
+  select r.id, r.state, r.priority, coalesce(r.reason,'') as reason, coalesce(r.specialty,'') as specialty,
+         coalesce(r.referring_provider,'') as referring_provider,
+         r.location, r.patient_id, r.escalation_reason, r.outreach_approved_at,
          p.name, to_char(p.date_of_birth, 'YYYY-MM-DD') as dob, coalesce(p.phone,'') as phone, p.language,
          p.sms_consent, p.sms_consent_at, p.sms_consent_source, p.sms_opted_out, p.sms_opted_out_at, p.sms_opt_out_source
     from referrals r join patients p on p.id = r.patient_id`;
 
 type RefRow = {
-  id: string; state: string; priority: string; reason: string; referring_provider: string; location: string;
-  patient_id: string; escalation_reason: string | null; name: string; dob: string | null; phone: string; language: string;
+  id: string; state: string; priority: string; reason: string; specialty: string; referring_provider: string; location: string;
+  patient_id: string; escalation_reason: string | null; outreach_approved_at: Date | null; name: string; dob: string | null; phone: string; language: string;
   sms_consent: boolean; sms_consent_at: Date | null; sms_consent_source: string | null;
   sms_opted_out: boolean; sms_opted_out_at: Date | null; sms_opt_out_source: string | null;
 };
 
 function toRef(r: RefRow): RefCtx {
   return {
-    id: r.id, state: r.state, priority: r.priority, reason: r.reason, referringProvider: r.referring_provider,
+    id: r.id, state: r.state, priority: r.priority, reason: r.reason, specialty: r.specialty, referringProvider: r.referring_provider,
     location: r.location, patientId: r.patient_id, patientName: r.name, firstName: r.name.split(/\s+/)[0] ?? r.name,
     dobIso: r.dob, phone: r.phone, language: r.language, consent: r.sms_consent, consentAt: r.sms_consent_at,
     consentSource: r.sms_consent_source, optedOut: r.sms_opted_out, optedOutAt: r.sms_opted_out_at,
     optOutSource: r.sms_opt_out_source, escalationReason: r.escalation_reason,
+    outreachApprovedAt: r.outreach_approved_at ?? null,
   };
 }
 
@@ -81,6 +88,29 @@ export async function listOutreachCandidates(q: Queryable): Promise<RefCtx[]> {
   const { rows } = await q.query<RefRow>(
     `${REF_SQL} where r.state in ('Queued', 'In Progress') order by (r.priority = 'urgent') desc, r.referral_time asc`);
   return rows.map(toRef);
+}
+
+/**
+ * Pilot mode: referrals whose first text has not gone out and that no one has
+ * approved yet (stored state Queued / In Progress, no outreach cycle started).
+ */
+export async function listAwaitingApproval(q: Queryable): Promise<(RefCtx & { referralTime: Date })[]> {
+  const { rows } = await q.query<RefRow & { referral_time: Date }>(
+    `${REF_SQL.replace('select r.id,', 'select r.referral_time, r.id,')}
+       left join sms_conversations c on c.referral_id = r.id
+      where r.state in ('Queued', 'In Progress') and r.outreach_approved_at is null
+        and coalesce(c.cycle_step, 0) = 0 and coalesce(c.outreach_count, 0) = 0
+      order by (r.priority = 'urgent') desc, r.referral_time asc`);
+  return rows.map(r => ({ ...toRef(r), referralTime: r.referral_time }));
+}
+
+/** Marks referrals approved for their first text. Returns the ids that changed. */
+export async function approveOutreach(q: Queryable, ids: string[], by: string, now: Date): Promise<string[]> {
+  if (!ids.length) return [];
+  const { rows } = await q.query<{ id: string }>(
+    `update referrals set outreach_approved_at = $2, outreach_approved_by = $3, updated_at = now()
+      where id = any($1::text[]) and outreach_approved_at is null returning id`, [ids, now, by]);
+  return rows.map(r => r.id);
 }
 
 /** Finds the referral an inbound text belongs to: same phone, most recently texted first. */
@@ -143,6 +173,8 @@ export async function setReferralState(q: Queryable, referralId: string, state: 
 export interface Conv {
   referralId: string;
   lockedLanguage: Lang | null;
+  /** A language other than English/Spanish the patient writes in (e.g. 'Portuguese'); null for en/es. */
+  replyLanguage: string | null;
   identityVerified: boolean;
   identityVerifiedAt: Date | null;
   identityAttempts: number;
@@ -179,6 +211,7 @@ function toConv(r: ConvRow): Conv {
   return {
     referralId: r.referral_id as string,
     lockedLanguage: (r.locked_language as Lang | null) ?? null,
+    replyLanguage: (r.reply_language as string | null) ?? null,
     identityVerified: r.identity_verified as boolean,
     identityVerifiedAt: (r.identity_verified_at as Date | null) ?? null,
     identityAttempts: r.identity_attempts as number,
@@ -218,7 +251,7 @@ export async function findConv(q: Queryable, referralId: string): Promise<Conv |
 }
 
 const CONV_COLUMNS: Record<keyof Omit<Conv, 'referralId'>, { col: string; json?: boolean }> = {
-  lockedLanguage: { col: 'locked_language' }, identityVerified: { col: 'identity_verified' },
+  lockedLanguage: { col: 'locked_language' }, replyLanguage: { col: 'reply_language' }, identityVerified: { col: 'identity_verified' },
   identityVerifiedAt: { col: 'identity_verified_at' }, identityAttempts: { col: 'identity_attempts' },
   offeredSlots: { col: 'offered_slots', json: true }, rejectedSlotKeys: { col: 'rejected_slot_keys', json: true },
   capturedSlotId: { col: 'captured_slot_id' }, preferences: { col: 'preferences', json: true },
@@ -375,8 +408,8 @@ export async function suppressHeldTexts(q: Queryable, referralId: string, why: s
 export async function captureSlot(q: Queryable, referralId: string, slot: OfferedSlot, now: Date): Promise<void> {
   await q.query(`update appointments set status = 'expired' where referral_id = $1 and status = 'captured'`, [referralId]);
   await q.query(
-    `insert into appointments (referral_id, status, day, time, provider, captured_at, mirror_status)
-     values ($1, 'captured', $2, $3, $4, $5, 'pending')`, [referralId, slot.day, slot.time, slot.provider, now]);
+    `insert into appointments (referral_id, status, day, time, provider, captured_at, mirror_status, epic_slot_ref)
+     values ($1, 'captured', $2, $3, $4, $5, 'pending', $6)`, [referralId, slot.day, slot.time, slot.provider, now, slot.epic_slot_ref ?? null]);
 }
 
 export async function confirmedAppointment(q: Queryable, referralId: string): Promise<{ day: string; time: string; provider: string } | null> {
@@ -432,6 +465,7 @@ export async function loadOutreachSettings(q: Queryable): Promise<OutreachSettin
   if (!r) return { ...DEFAULT_OUTREACH_SETTINGS, updatedAt: null, updatedBy: null };
   return {
     textingPaused: r.texting_paused as boolean,
+    approvalRequired: r.approval_required === undefined ? true : (r.approval_required as boolean),
     quietStart: r.quiet_start as string,
     quietEnd: r.quiet_end as string,
     allowedDays: json<number[]>(r.allowed_days, DEFAULT_OUTREACH_SETTINGS.allowedDays),
@@ -449,15 +483,17 @@ export async function loadOutreachSettings(q: Queryable): Promise<OutreachSettin
 export async function saveOutreachSettings(q: Queryable, s: OutreachSettings, by: string): Promise<void> {
   await q.query(
     `insert into sms_settings (id, texting_paused, quiet_start, quiet_end, allowed_days, holidays, cadence_days,
-        lifetime_cap, min_spacing_hours, exhausted_after_hours, ai_daily_cap, updated_at, updated_by)
-     values ('default', $1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10, now(), $11)
+        lifetime_cap, min_spacing_hours, exhausted_after_hours, ai_daily_cap, updated_at, updated_by, approval_required)
+     values ('default', $1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10, now(), $11, $12)
      on conflict (id) do update set texting_paused = excluded.texting_paused, quiet_start = excluded.quiet_start,
         quiet_end = excluded.quiet_end, allowed_days = excluded.allowed_days, holidays = excluded.holidays,
         cadence_days = excluded.cadence_days, lifetime_cap = excluded.lifetime_cap,
         min_spacing_hours = excluded.min_spacing_hours, exhausted_after_hours = excluded.exhausted_after_hours,
-        ai_daily_cap = excluded.ai_daily_cap, updated_at = now(), updated_by = excluded.updated_by`,
+        ai_daily_cap = excluded.ai_daily_cap, updated_at = now(), updated_by = excluded.updated_by,
+        approval_required = excluded.approval_required`,
     [s.textingPaused, s.quietStart, s.quietEnd, JSON.stringify(s.allowedDays), JSON.stringify(s.holidays),
-      JSON.stringify(s.cadenceDays), s.lifetimeCap, s.minSpacingHours, s.exhaustedAfterHours, s.aiDailyCap, by]);
+      JSON.stringify(s.cadenceDays), s.lifetimeCap, s.minSpacingHours, s.exhaustedAfterHours, s.aiDailyCap, by,
+      s.approvalRequired]);
 }
 
 // ── Inbound de-dupe ─────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 // the authorization URL, logout URLs and the login-screen states. No network.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as oidc from 'openid-client';
-import { safeNext, DEFAULT_AFTER_LOGIN } from '@/server/auth/redirect';
+import { safeNext, signedOutDestination, DEFAULT_AFTER_LOGIN } from '@/server/auth/redirect';
 import { checkSession, shouldRenew, signSession, RENEW_AFTER_S } from '@/server/auth/session';
 import { mapAuthorizeError, mapCallbackException } from '@/server/auth/errors';
 import { buildAuthorizationUrl, cognitoLogoutUrl, LOGOUT_RETURN_PATHS, roleFromGroups } from '@/server/auth/cognito';
@@ -183,5 +183,30 @@ describe('login screen states', () => {
   it('has Spanish text for every English message', () => {
     for (const k of Object.keys(COPY.en.errors) as (keyof typeof COPY.en.errors)[]) expect(COPY.es.errors[k]).toBeTruthy();
     expect(COPY.es.firstTimeSteps).toHaveLength(COPY.en.firstTimeSteps.length);
+  });
+});
+
+describe('signed-out page requests (option 8: straight to the clinic sign-in page)', () => {
+  it('Cognito + no session → /api/auth/login, keeping the page they asked for', () => {
+    expect(signedOutDestination({ cognito: true, next: '/referrals/REF-1001?tab=sms', expired: null }))
+      .toBe('/api/auth/login?next=%2Freferrals%2FREF-1001%3Ftab%3Dsms');
+    expect(signedOutDestination({ cognito: true, next: null, expired: null })).toBe('/api/auth/login');
+    expect(signedOutDestination({ cognito: true, next: '/', expired: null })).toBe('/api/auth/login');
+  });
+  it('an expired session still lands on /login so it can say why', () => {
+    expect(signedOutDestination({ cognito: true, next: '/dashboard', expired: 'idle' })).toBe('/login?next=%2Fdashboard&reason=idle');
+    expect(signedOutDestination({ cognito: true, next: null, expired: 'absolute' })).toBe('/login?reason=absolute');
+  });
+  it('mock login or sign-in not set up → /login (test-user picker or the setup message)', () => {
+    expect(signedOutDestination({ cognito: false, next: '/calendar', expired: null })).toBe('/login?next=%2Fcalendar');
+    expect(signedOutDestination({ cognito: false, next: null, expired: null })).toBe('/login');
+  });
+  it('the next page is still checked by safeNext after sign-in (no open redirect)', () => {
+    const dest = new URL(signedOutDestination({ cognito: true, next: '//evil.example', expired: null }), 'http://x');
+    expect(safeNext(dest.searchParams.get('next'))).toBe(DEFAULT_AFTER_LOGIN);
+  });
+  it('"Sign in again" exists in both languages', () => {
+    expect(COPY.en.signInAgain).toBe('Sign in again');
+    expect(COPY.es.signInAgain).toBeTruthy();
   });
 });

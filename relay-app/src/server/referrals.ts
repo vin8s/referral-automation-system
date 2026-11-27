@@ -6,8 +6,11 @@
 
 import 'server-only';
 import { getDb, type Queryable } from './db';
+import { EhrError, getEhrConnector, getEpicSettings, type EhrAppointment } from './ehr';
+import { clearEpicSlotCache } from './sms/epicSlots';
 import { normCalDay, outcomeLabel } from '@/lib/format';
 import type { SessionUser } from '@/lib/auth-types';
+import { sanitizeSpecialty } from '@/lib/specialties';
 import type {
   Referral, ReferralState, Attempt, ConfirmQueueItem, EscalationItem, OutreachLogEntry,
   CalendarEvent, PipelineCount, ReferralLogEntry, OutreachOutcome, Priority, TranscriptTurn,
@@ -21,7 +24,7 @@ export const REFERRAL_STATES: ReferralState[] = [
 
 // ── Formatting (always in the clinic's time zone, not the server's) ──────────
 
-const TZ = process.env.CLINIC_TIMEZONE || 'America/Los_Angeles';
+const TZ = process.env.CLINIC_TIMEZONE || 'America/New_York';
 
 function fmtDate(v: Date | string | null | undefined): string {
   if (!v) return '';
@@ -84,7 +87,7 @@ async function audit(
 // ── Row types ────────────────────────────────────────────────────────────────
 
 interface ReferralRow {
-  id: string; reason: string | null; referring_provider: string | null; referral_source: string | null;
+  id: string; reason: string | null; specialty: string | null; referring_provider: string | null; referral_source: string | null;
   referral_time: Date; location: string; priority: string; state: string;
   escalation_reason: string | null; escalation_severity: string | null;
   escalation_raised_at: Date | null; escalation_owner: string | null;
@@ -104,13 +107,14 @@ const SMS_ONLY = `channel = 'sms'`;
 interface ApptRow {
   referral_id: string; status: string; day: string; time: string; provider: string;
   captured_at: Date; confirmed_at: Date | null; confirmed_by: string | null; mirror_status: string;
+  epic_slot_ref?: string | null; epic_appointment_id?: string | null;
 }
 interface AuditRow {
   referral_id: string; created_at: Date; actor_name: string | null; actor_role: string | null; what: string;
 }
 
 const REFERRAL_COLUMNS = `
-  r.id, r.reason, r.referring_provider, r.referral_source, r.referral_time, r.location,
+  r.id, r.reason, r.specialty, r.referring_provider, r.referral_source, r.referral_time, r.location,
   r.priority, r.state, r.escalation_reason, r.escalation_severity, r.escalation_raised_at,
   r.escalation_owner,
   p.name as p_name, to_char(p.date_of_birth, 'YYYY-MM-DD') as p_dob, p.sex as p_sex,
@@ -186,6 +190,7 @@ async function loadReferrals(
         ...(row.p_mrn ? { mrn: row.p_mrn } : {}),
       },
       reason: row.reason ?? '',
+      specialty: row.specialty ?? '',
       referringProvider: row.referring_provider ?? '',
       referralSource: row.referral_source ?? '',
       referralTime: fmtDate(row.referral_time),
@@ -197,6 +202,7 @@ async function loadReferrals(
         time: captured.time,
         provider: captured.provider,
         capturedAgoMin: Math.floor((Date.now() - new Date(captured.captured_at).getTime()) / 60000),
+        ...(captured.epic_slot_ref ? { epic: true } : {}),
       } : null,
       bookedAppointment: confirmed ? {
         day: confirmed.day,
@@ -205,6 +211,7 @@ async function loadReferrals(
         confirmedBy: confirmed.confirmed_by ?? 'Staff',
         confirmedAt: fmtDate(confirmed.confirmed_at),
         mirrorStatus: confirmed.mirror_status as 'mirrored' | 'pending' | 'failed',
+        ...(confirmed.epic_appointment_id ? { epicAppointmentId: confirmed.epic_appointment_id } : {}),
       } : undefined,
       escalation: row.escalation_reason ? {
         reason: row.escalation_reason,
@@ -240,7 +247,9 @@ export async function getReferralForView(id: string, actor: Actor): Promise<Refe
 const PLACEHOLDER_SLOT = { day: 'To be confirmed', time: 'TBD', provider: 'TBD', capturedAgoMin: null };
 
 export async function listConfirmQueue(): Promise<ConfirmQueueItem[]> {
-  const refs = await loadReferrals(await getDb(), { states: ['Pending Confirmation'] });
+  const db = await getDb();
+  const refs = await loadReferrals(db, { states: ['Pending Confirmation'] });
+  const epicBooking = (await getEpicSettings(db)).bookingEnabled;
   return refs.reverse().map(r => {   // oldest referral first
     const slot = r.capturedSlot ?? PLACEHOLDER_SLOT;
     const last = r.attempts[r.attempts.length - 1];
@@ -257,6 +266,7 @@ export async function listConfirmQueue(): Promise<ConfirmQueueItem[]> {
       capturedAgoMin: slot.capturedAgoMin,
       priority: r.priority,
       summary: last?.summary ?? '',
+      ...(epicBooking && r.capturedSlot?.epic ? { epicBooking: true } : {}),
     };
   });
 }
@@ -358,7 +368,8 @@ export async function listCalendarEvents(): Promise<CalendarEvent[]> {
     if (r.bookedAppointment) {
       const day = normCalDay(r.bookedAppointment.day);
       if (day) events.push({ ...base, day, time: r.bookedAppointment.time, provider: r.bookedAppointment.provider,
-        mirrorStatus: r.bookedAppointment.mirrorStatus, isShadow: false });
+        mirrorStatus: r.bookedAppointment.mirrorStatus, isShadow: false,
+        ...(r.bookedAppointment.epicAppointmentId ? { bookedInEpic: true } : {}) });
     }
     if (r.capturedSlot) {
       const day = normCalDay(r.capturedSlot.day);
@@ -413,8 +424,35 @@ async function referralExists(q: Queryable, id: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-export async function confirmSlot(referralId: string, actor: Actor): Promise<Result> {
+/** Result of the MA's Confirm. `epic` is set when the slot was booked in the Epic sandbox (prototype). */
+export type ConfirmResult = Result & {
+  epic?: { appointmentId: string };
+  /** Why it failed, for the MA (e.g. the Epic slot was taken: new times are offered by text). */
+  error?: string;
+  /** 'slot_unavailable': the captured slot was released and the referral re-entered outreach. */
+  code?: 'slot_unavailable' | 'epic_error';
+  /** The released slot (so the caller can re-offer new times by text). */
+  released?: { day: string; time: string };
+};
+
+/**
+ * MA confirms a captured slot. Connector mode (default): the MA has booked it in the practice system.
+ * Epic sandbox prototype ("Book into Epic (sandbox)" on + an Epic slot was captured): Relay books the slot
+ * in Epic with $book FIRST, and only then marks it confirmed (so it appears on Relay's Calendar).
+ * A person always triggers this; nothing books on its own.
+ */
+export async function confirmSlot(referralId: string, actor: Actor): Promise<ConfirmResult> {
   const db = await getDb();
+  const { rows: pending } = await db.query<{ day: string; time: string; epic_slot_ref: string | null; epic_patient_id: string | null }>(
+    `select a.day, a.time, a.epic_slot_ref, p.epic_patient_id
+       from appointments a join referrals r on r.id = a.referral_id join patients p on p.id = r.patient_id
+      where a.referral_id = $1 and a.status = 'captured' order by a.captured_at desc limit 1`, [referralId]);
+  const cap = pending[0];
+  if (!cap) return { success: false };
+
+  if (cap.epic_slot_ref && cap.epic_patient_id && (await getEpicSettings(db)).bookingEnabled) {
+    return confirmWithEpicBooking(referralId, actor, { ...cap, epic_slot_ref: cap.epic_slot_ref, epic_patient_id: cap.epic_patient_id });
+  }
   return db.transaction(async tx => {
     const { rows } = await tx.query<{ day: string; time: string }>(
       `update appointments set status = 'confirmed', confirmed_at = now(), confirmed_by = $2, mirror_status = 'mirrored'
@@ -424,6 +462,62 @@ export async function confirmSlot(referralId: string, actor: Actor): Promise<Res
     await audit(tx, actor, referralId, 'slot.confirm', 'Slot confirmed in practice system');
     return { success: true };
   });
+}
+
+// One booking at a time per referral (two MAs clicking Confirm together must not $book twice).
+const bookingInFlight = new Set<string>();
+
+async function confirmWithEpicBooking(
+  referralId: string, actor: Actor, cap: { day: string; time: string; epic_slot_ref: string; epic_patient_id: string },
+): Promise<ConfirmResult> {
+  if (bookingInFlight.has(referralId)) return { success: false, error: 'This slot is already being booked in Epic.' };
+  bookingInFlight.add(referralId);
+  try {
+    let booked: EhrAppointment;
+    try {
+      booked = await getEhrConnector().bookSlot({
+        patientId: cap.epic_patient_id,
+        slotRef: cap.epic_slot_ref,
+        note: `Relay sandbox test booking (synthetic data). Patient picked this time by text; confirmed by ${actor.name}.`,
+      });
+    } catch (err) {
+      const db = await getDb();
+      if (err instanceof EhrError && err.code === 'slot_unavailable') {
+        // Release the stale slot and send the referral back to outreach; the caller re-offers new times.
+        await db.transaction(async tx => {
+          await tx.query(`update appointments set status = 'expired' where referral_id = $1 and status = 'captured'`, [referralId]);
+          await tx.query(`update referrals set state = 'In Progress', updated_at = now() where id = $1`, [referralId]);
+          await audit(tx, actor, referralId, 'epic.book_failed', `Epic sandbox: slot ${cap.day} ${cap.time} no longer available — new times will be offered`);
+        });
+        clearEpicSlotCache(referralId);
+        return {
+          success: false, code: 'slot_unavailable', released: { day: cap.day, time: cap.time },
+          error: 'That time is no longer open in Epic. The patient will be offered new times by text.',
+        };
+      }
+      await db.transaction(tx => audit(tx, actor, referralId, 'epic.book_failed',
+        `Epic sandbox booking failed: ${err instanceof Error ? err.message : String(err)}`).then(() => undefined));
+      return {
+        success: false, code: 'epic_error',
+        error: `Could not book in Epic: ${err instanceof Error ? err.message : String(err)} Nothing was changed; try again.`,
+      };
+    }
+
+    const db = await getDb();
+    return await db.transaction(async tx => {
+      const { rows } = await tx.query(
+        `update appointments set status = 'confirmed', confirmed_at = now(), confirmed_by = $2, mirror_status = 'mirrored',
+                epic_appointment_id = $3
+          where referral_id = $1 and status = 'captured' returning id`, [referralId, actor.name, booked.id]);
+      if (rows.length === 0) return { success: false, error: 'The captured slot changed while booking. Check Epic and the referral.' };
+      await tx.query(`update referrals set state = 'Booked', updated_at = now() where id = $1`, [referralId]);
+      await audit(tx, actor, referralId, 'slot.confirm',
+        `Booked in Epic sandbox (appointment ${booked.id}) for ${cap.day} ${cap.time} — confirmed by MA (prototype)`);
+      return { success: true, epic: { appointmentId: booked.id } };
+    });
+  } finally {
+    bookingInFlight.delete(referralId);
+  }
 }
 
 export async function rejectSlot(referralId: string, actor: Actor): Promise<Result> {
@@ -495,10 +589,10 @@ export async function updateReferralState(referralId: string, state: ReferralSta
 
 export interface ReferralDraft {
   patientName?: string; dateOfBirth?: string; phone?: string; language?: string;
-  insurance?: string; reason?: string; referringProvider?: string; priority?: string;
+  insurance?: string; reason?: string; specialty?: string; referringProvider?: string; priority?: string;
 }
 
-const DRAFT_KEYS = ['patientName', 'dateOfBirth', 'phone', 'language', 'insurance', 'reason', 'referringProvider', 'priority'] as const;
+const DRAFT_KEYS = ['patientName', 'dateOfBirth', 'phone', 'language', 'insurance', 'reason', 'specialty', 'referringProvider', 'priority'] as const;
 
 /** Keeps only known draft fields that are strings, trimmed and length-capped (input from the browser). */
 export function sanitizeDraft(raw: unknown): ReferralDraft {
@@ -508,6 +602,8 @@ export function sanitizeDraft(raw: unknown): ReferralDraft {
     const v = r[k];
     if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, k === 'reason' ? 1000 : 200);
   }
+  // Specialty can reach a patient text: keep only safe characters (no digits, links or punctuation).
+  if (out.specialty !== undefined) out.specialty = sanitizeSpecialty(out.specialty) || undefined;
   return out;
 }
 
@@ -535,9 +631,9 @@ export async function updateReferral(
         draft.insurance || null, mdyToIso(draft.dateOfBirth)]);
     await tx.query(
       `update referrals set reason = coalesce($2, reason), referring_provider = coalesce($3, referring_provider),
-              priority = coalesce($4, priority), updated_at = now()
+              priority = coalesce($4, priority), specialty = coalesce($5, specialty), updated_at = now()
         where id = $1`,
-      [referralId, draft.reason || null, draft.referringProvider || null, priority]);
+      [referralId, draft.reason || null, draft.referringProvider || null, priority, draft.specialty || null]);
 
     const lines: string[] = [];
     if (draft.patientName)       lines.push(`Name → ${draft.patientName}`);
@@ -546,6 +642,7 @@ export async function updateReferral(
     if (draft.insurance)         lines.push(`Insurance → ${draft.insurance}`);
     if (mdyToIso(draft.dateOfBirth)) lines.push(`DOB → ${draft.dateOfBirth}`);
     if (draft.reason)            lines.push(`Reason → ${draft.reason}`);
+    if (draft.specialty)         lines.push(`Specialty → ${draft.specialty}`);
     if (draft.referringProvider) lines.push(`Provider → ${draft.referringProvider}`);
     if (priority)                lines.push(`Priority → ${priority}`);
     if (comment?.trim())         lines.push(`Comment: ${comment.trim()}`);
@@ -557,24 +654,36 @@ export async function updateReferral(
     const phoneChanged = !!draft.phone && phoneDigits(draft.phone) !== phoneDigits(before.phone);
     const dobChanged = !!newDob && newDob !== before.dob;
     if (phoneChanged || dobChanged) {
-      const { rows: reset } = await tx.query<{ referral_id: string }>(
-        `update sms_conversations set identity_verified = false, identity_verified_at = null, identity_attempts = 0,
-                updated_at = now()
-          where referral_id in (select id from referrals where patient_id = $1) and identity_verified
-          returning referral_id`, [before.patient_id]);
-      for (const r of reset) {
-        await audit(tx, actor, r.referral_id, 'sms.identity_reset',
-          `${phoneChanged ? 'Phone number' : 'Date of birth'} changed — patient must confirm date of birth again by text`);
-      }
+      await resetTextIdentity(tx, before.patient_id, phoneChanged ? 'Phone number' : 'Date of birth', actor);
     }
     return { success: true };
   });
+}
+
+/**
+ * A patient's phone or date of birth changed: any text identity check already passed for their
+ * referrals no longer counts (R4.2/R4.4). Used by staff edits and by Epic sync.
+ */
+export async function resetTextIdentity(
+  q: Queryable, patientId: string, what: 'Phone number' | 'Date of birth', actor: Actor,
+): Promise<void> {
+  const { rows: reset } = await q.query<{ referral_id: string }>(
+    `update sms_conversations set identity_verified = false, identity_verified_at = null, identity_attempts = 0,
+            updated_at = now()
+      where referral_id in (select id from referrals where patient_id = $1) and identity_verified
+      returning referral_id`, [patientId]);
+  for (const r of reset) {
+    await audit(q, actor, r.referral_id, 'sms.identity_reset',
+      `${what} changed — patient must confirm date of birth again by text`);
+  }
 }
 
 export interface IngestRow {
   patientName: string; dateOfBirth?: string; phone: string; sex?: 'M' | 'F' | '';
   language?: string; insurance?: string; reason?: string; referringProvider?: string;
   priority?: Priority; location?: string;
+  /** Appointment specialty; shown to the patient only in the time offer, after DOB verification. */
+  specialty?: string;
   /**
    * SMS consent is never assumed: only an explicit `true` records consent (with
    * who recorded it and where it came from). Anything else leaves consent off,
@@ -593,10 +702,39 @@ export function sanitizeIngestRow(raw: unknown): IngestRow {
   return {
     patientName: s('patientName'), phone: s('phone', 40), dateOfBirth: opt('dateOfBirth', 20),
     sex: r.sex === 'F' ? 'F' : r.sex === 'M' ? 'M' : '', language: opt('language', 40), insurance: opt('insurance'),
-    reason: opt('reason', 1000), referringProvider: opt('referringProvider'),
+    reason: opt('reason', 1000), specialty: sanitizeSpecialty(s('specialty', 80)) || undefined, referringProvider: opt('referringProvider'),
     priority: r.priority === 'urgent' ? 'urgent' : 'normal', location: opt('location'),
     smsConsent: r.smsConsent === true, smsConsentSource: opt('smsConsentSource', 120),
   };
+}
+
+/** Next free REF-#### number. Call inside the creating transaction. */
+export async function nextReferralNumber(q: Queryable): Promise<number> {
+  const { rows } = await q.query<{ max: number | null }>(
+    `select max(substring(id from 5)::int) as max from referrals where id ~ '^REF-[0-9]+$'`);
+  return Math.max(rows[0]?.max ?? 0, 1042) + 1;
+}
+
+/**
+ * Inserts one new referral (state Queued) for an existing patient and audit-logs it. The single
+ * creation path for spreadsheet/manual ingest and Epic sync, so every new referral starts the same
+ * way: Queued and not yet approved for outreach (pilot mode lists it under "Ready to text").
+ * `row` must already be sanitized (`sanitizeIngestRow`). Never texts anyone: the outreach
+ * scheduler does that, under its own rules.
+ */
+export async function insertNewReferral(
+  q: Queryable,
+  input: { id: string; patientId: string; row: IngestRow; source: string; auditWhat: string },
+  actor: Actor,
+): Promise<string> {
+  const { id, patientId, row, source, auditWhat } = input;
+  await q.query(
+    `insert into referrals (id, patient_id, reason, referring_provider, referral_source, location, priority, state, specialty)
+     values ($1, $2, $3, $4, $5, $6, $7, 'Queued', $8)`,
+    [id, patientId, row.reason ?? '', row.referringProvider ?? '', source, row.location || 'Providence',
+      row.priority === 'urgent' ? 'urgent' : 'normal', row.specialty || null]);
+  await audit(q, actor, id, 'referral.ingest', auditWhat);
+  return id;
 }
 
 export async function ingestReferrals(
@@ -604,9 +742,7 @@ export async function ingestReferrals(
 ): Promise<{ success: boolean; importedCount: number; consentedCount: number }> {
   const db = await getDb();
   return db.transaction(async tx => {
-    const { rows: maxRows } = await tx.query<{ max: number | null }>(
-      `select max(substring(id from 5)::int) as max from referrals where id ~ '^REF-[0-9]+$'`);
-    let next = Math.max(maxRows[0]?.max ?? 0, 1042) + 1;
+    let next = await nextReferralNumber(tx);
     let importedCount = 0;
     let consentedCount = 0;
     for (const raw of rows) {
@@ -622,16 +758,12 @@ export async function ingestReferrals(
          values ($1, $2, $3, $4, $5, $6::date, $7::boolean, case when $7::boolean then now() end, $8) returning id`,
         [row.patientName.trim(), row.phone.trim(), row.language || 'English', row.insurance ?? '',
           row.sex === 'F' ? 'F' : 'M', mdyToIso(row.dateOfBirth), consent, consentSource]);
-      const referralId = `REF-${next++}`;
-      await tx.query(
-        `insert into referrals (id, patient_id, reason, referring_provider, referral_source, location, priority, state)
-         values ($1, $2, $3, $4, $5, $6, $7, 'Queued')`,
-        [referralId, pt[0].id, row.reason ?? '', row.referringProvider ?? '',
-          via === 'manual' ? 'Manual entry' : 'Uploaded batch', row.location || 'Providence',
-          row.priority === 'urgent' ? 'urgent' : 'normal']);
-      await audit(tx, actor, referralId, 'referral.ingest',
-        `${via === 'manual' ? 'Entered manually' : 'Ingested via spreadsheet upload'} · ` +
-        (consent ? `SMS consent recorded (${consentSource})` : 'SMS consent not recorded — no texts until staff record it'));
+      await insertNewReferral(tx, {
+        id: `REF-${next++}`, patientId: pt[0].id, row,
+        source: via === 'manual' ? 'Manual entry' : 'Uploaded batch',
+        auditWhat: `${via === 'manual' ? 'Entered manually' : 'Ingested via spreadsheet upload'} · ` +
+          (consent ? `SMS consent recorded (${consentSource})` : 'SMS consent not recorded'),
+      }, actor);
       importedCount++;
       if (consent) consentedCount++;
     }

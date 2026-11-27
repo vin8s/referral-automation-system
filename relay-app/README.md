@@ -193,4 +193,10 @@ Infrastructure lives in [`../infra`](../infra) (AWS CDK); the beginner walkthrou
 ## Commands
 
 `npm run dev` · `npm run build` · `npm run lint` · `npm run typecheck` · `npm test` ·
-`npm run db:migrate` · `npm run db:seed` · `npm run db:reset`
+`npm run db:migrate` · `npm run db:seed` · `npm run db:reset` · `npm run db:reset-empty`
+
+The dev database starts **empty** (no fake patients). Set `SEED_FAKE_DATA=true` in `.env.local`
+to load the fake demo referrals into an empty database on start, or run `npm run db:seed`.
+`npm run db:reset-empty` wipes the dev database (stop `npm run dev` first). Admins can also
+clear all referral/patient data from Settings → Demo data → **Reset demo** (refused in
+production unless `DEMO_RESET_ENABLED=true`).

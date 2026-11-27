@@ -113,6 +113,7 @@ export default function ReferralDetailPage() {
       language: r.patient.language,
       insurance: r.patient.insurance,
       reason: r.reason,
+      specialty: r.specialty ?? "",
       referringProvider: r.referringProvider,
       priority: r.priority,
     });
@@ -322,6 +323,7 @@ export default function ReferralDetailPage() {
               {!editing ? (
                 <>
                   <Fact label="Reason" value={r.reason} />
+                  <Fact label="Specialty" value={r.specialty || "—"} />
                   <Fact
                     label="Referring provider"
                     value={r.referringProvider}
@@ -337,6 +339,12 @@ export default function ReferralDetailPage() {
                   <EditField
                     label="Reason"
                     field="reason"
+                    draft={editDraft}
+                    setDraft={setEditDraft}
+                  />
+                  <EditField
+                    label="Specialty"
+                    field="specialty"
                     draft={editDraft}
                     setDraft={setEditDraft}
                   />

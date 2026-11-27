@@ -1,9 +1,12 @@
 // Timing rules for texting (AGENT_SAFETY_RULES R7). Pure functions; `now` is always passed in.
 
 import 'server-only';
+import { allowedNumbers } from './allowlist';
 
 export interface OutreachSettings {
   textingPaused: boolean;
+  /** Pilot mode: staff approve each referral before its first text. */
+  approvalRequired: boolean;
   quietStart: string;          // 'HH:MM' local — sending allowed from here…
   quietEnd: string;            // …until here
   allowedDays: number[];       // 0 = Sunday … 6 = Saturday
@@ -17,6 +20,7 @@ export interface OutreachSettings {
 
 export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
   textingPaused: false,
+  approvalRequired: true,
   quietStart: '08:00',
   quietEnd: '20:00',
   allowedDays: [1, 2, 3, 4, 5, 6],
@@ -28,8 +32,25 @@ export const DEFAULT_OUTREACH_SETTINGS: OutreachSettings = {
   aiDailyCap: 15,
 };
 
+const DEFAULT_TZ = 'America/New_York';
+let warnedTz: string | null = null;
+
+/**
+ * CLINIC_TIMEZONE, or America/New_York. A typo ("America/NewYork", "EST5") used to make
+ * Intl throw a RangeError on every inbound turn and every outreach tick.
+ */
 export function clinicTimeZone(): string {
-  return process.env.CLINIC_TIMEZONE || 'America/Los_Angeles';
+  const tz = process.env.CLINIC_TIMEZONE || DEFAULT_TZ;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    if (warnedTz !== tz) {
+      warnedTz = tz;
+      console.error(`[relay] CLINIC_TIMEZONE is not a valid IANA time zone; using ${DEFAULT_TZ}`);
+    }
+    return DEFAULT_TZ;
+  }
 }
 
 const WD: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -72,9 +93,24 @@ function isAllowedDay(p: ZonedParts, s: OutreachSettings): boolean {
 
 /** True when unsolicited / non-urgent texts may go out (8am–8pm Mon–Sat local, not holidays). */
 export function isWithinSendWindow(now: Date, s: OutreachSettings, tz = clinicTimeZone()): boolean {
+  if (testAnyTime()) return true;
   const p = zonedParts(now, tz);
   const mins = p.hour * 60 + p.minute;
   return isAllowedDay(p, s) && mins >= minutesOf(s.quietStart) && mins < minutesOf(s.quietEnd);
+}
+
+/**
+ * Test/demo override: SMS_TEST_ANY_TIME=on lets texts go out on any day at any hour (24/7), but
+ * never in production, and only when no real patient can be texted:
+ *   - the mock provider (demos: texts only appear in the app, nothing reaches a phone), or
+ *   - a real provider with SMS_ALLOWED_NUMBERS set (phone test: only the listed test phones).
+ * Real patients always get the R7.1 window.
+ */
+export function testAnyTime(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.SMS_TEST_ANY_TIME !== 'on' || env.NODE_ENV === 'production') return false;
+  const provider = env.SMS_PROVIDER?.toLowerCase();
+  const realProvider = provider === 'aws' || provider === 'twilio';   // same rule as smsProviderName()
+  return !realProvider || !!allowedNumbers(env);
 }
 
 /** Start of the next allowed window (now if already inside one). */

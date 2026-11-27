@@ -13,8 +13,9 @@ import type {
   OutreachLogEntry, CalendarEvent, PipelineCount,
   Org, CurrentUser,
   Priority, ReferralLogEntry, RawSettings,
-  SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, OutreachTickResult,
+  SmsThread, SmsChannelPreference, NeedsHumanItem, OutreachSettings, OutreachSettingsView, ReadyToTextView,
   EcwImportOverview, EcwImportStatus, EcwImportDraft, EcwApplyResult, EcwImportDetail,
+  EpicFeedPatient, EpicSettingsView, EpicSyncResult,
 } from './types';
 import type { EcwImportOptions, EcwMapping } from './ecwImport';
 
@@ -105,8 +106,18 @@ export async function getConfirmQueue(): Promise<ConfirmQueue> {
 }
 
 /** MA confirms an AI-captured slot they have booked in the practice system. */
-export async function confirmSlot(referralId: string): Promise<{ success: boolean }> {
-  return mutate(`${ref(referralId)}/confirm`, 'POST');
+export interface ConfirmSlotResult {
+  success: boolean;
+  /** Set when the slot was booked in the Epic sandbox (prototype). */
+  epic?: { appointmentId: string };
+  /** Message for the MA when it failed (e.g. the Epic slot was taken). */
+  error?: string;
+  errorMsg?: string;
+  code?: 'slot_unavailable' | 'epic_error';
+}
+
+export async function confirmSlot(referralId: string): Promise<ConfirmSlotResult> {
+  return mutate<ConfirmSlotResult>(`${ref(referralId)}/confirm`, 'POST');
 }
 
 export async function rejectSlot(referralId: string): Promise<{ success: boolean }> {
@@ -197,6 +208,7 @@ export interface IngestReferralInput {
   language?: string;
   insurance?: string;
   reason?: string;
+  specialty?: string;
   referringProvider?: string;
   priority?: Priority;
   location?: string;
@@ -319,7 +331,46 @@ export async function resolveScheduleReviewItem(
   return mutate(`/schedule-import/review/${encodeURIComponent(itemId)}`, 'POST', decision);
 }
 
-/** Admin only: run the outreach scheduler once now (the same job EventBridge runs on a schedule). */
-export async function runOutreachNow(): Promise<OutreachTickResult> {
-  return api<OutreachTickResult>('/sms/outreach/tick', { method: 'POST' });
+// ── Pilot mode: "Ready to text" ─────────────────────────────────────────────
+
+/** Referrals waiting for staff approval before their first text (empty when pilot mode is off). */
+export async function getReadyToText(): Promise<ReadyToTextView> {
+  return api<ReadyToTextView>('/sms/ready-to-text');
+}
+
+/** Approve referrals for their first text; Relay then sends it in the next sending window. */
+export async function approveForTexting(
+  referralIds: string[],
+): Promise<{ approved: string[]; notApproved: { referralId: string; reason: string }[] }> {
+  return api('/sms/ready-to-text', { method: 'POST', body: { referralIds } });
+}
+
+// ── Epic sandbox prototype (docs/EPIC_PROTOTYPE_PLAN.md) ────────────────────
+
+/** Epic sandbox settings + which connector is active ('epic-sandbox' or the built-in 'fake'). Any staff. */
+export async function getEpicSettings(): Promise<EpicSettingsView> {
+  return api<EpicSettingsView>('/epic/settings');
+}
+
+/** Admin only: "Book into Epic (sandbox)" toggle + the simulated referral feed. Throws ApiError (400 with the message, 403). */
+export async function saveEpicSettings(s: { bookingEnabled: boolean; patients: EpicFeedPatient[] }): Promise<EpicSettingsView> {
+  return api<EpicSettingsView>('/epic/settings', { method: 'PUT', body: s });
+}
+
+/** Admin only, prototype: imports the Epic feed patients as referrals. Never sends texts. Throws ApiError. */
+export async function syncFromEpic(): Promise<EpicSyncResult> {
+  return api<EpicSyncResult>('/epic/sync', { method: 'POST' });
+}
+
+// ── Demo data (prototype) ────────────────────────────────────────────────────
+
+/**
+ * Admin only: delete every referral, patient, appointment, text and import so a demo
+ * can be re-run from an empty app. Settings, users and saved column mappings are kept.
+ * `confirm` must be the word RESET.
+ */
+export async function resetDemo(
+  confirm: string,
+): Promise<{ success: boolean; total?: number; deleted?: Record<string, number>; errorMsg?: string }> {
+  return mutate('/demo/reset', 'POST', { confirm });
 }

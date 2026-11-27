@@ -4,7 +4,7 @@
 import 'server-only';
 import { createDb, type Db } from './driver';
 import { runMigrations } from './migrate';
-import { backfillSeedMrns, seedIfEmpty } from './seed';
+import { backfillSeedMrns, fakeSeedEnabled, seedIfEmpty } from './seed';
 
 export type { Db, Queryable } from './driver';
 
@@ -14,13 +14,14 @@ const g = globalThis as unknown as { __relayDb?: Promise<Db> };
 
 async function init(): Promise<Db> {
   const db = await createDb();
-  // Development: migrate + seed automatically so `npm run dev` just works.
+  // Development: migrate automatically so `npm run dev` just works; fake referrals are
+  // loaded only with SEED_FAKE_DATA=true (otherwise the app starts empty).
   // Production: run `npm run db:migrate` as a deploy step instead.
   if (process.env.NODE_ENV !== 'production' || process.env.DB_AUTO_MIGRATE === 'true') {
     const ran = await runMigrations(db);
     if (ran.length) console.log(`[db] applied migrations: ${ran.join(', ')}`);
     if (process.env.NODE_ENV !== 'production') {
-      if (await seedIfEmpty(db)) console.log('[db] empty database seeded with fake data');
+      if (fakeSeedEnabled() && await seedIfEmpty(db)) console.log('[db] empty database seeded with fake data (SEED_FAKE_DATA=true)');
       await backfillSeedMrns(db);
     }
   }

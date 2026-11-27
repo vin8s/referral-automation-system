@@ -11,6 +11,7 @@ interface Copy {
   title: string;
   subtitle: string;
   signIn: string;
+  signInAgain: string;
   tryAgain: string;
   staffOnly: string;
   firstTimeTitle: string;
@@ -32,6 +33,7 @@ export const COPY: Record<Lang, Copy> = {
     title: 'Sign in to Relay',
     subtitle: 'Referral scheduling console',
     signIn: 'Sign in',
+    signInAgain: 'Sign in again',
     tryAgain: 'Try again',
     staffOnly: 'Clinic staff only. Sign-in uses your clinic account and an authenticator app, and activity is recorded in the audit log.',
     firstTimeTitle: 'First time signing in?',
@@ -62,6 +64,7 @@ export const COPY: Record<Lang, Copy> = {
     title: 'Iniciar sesión en Relay',
     subtitle: 'Consola de citas de referidos',
     signIn: 'Iniciar sesión',
+    signInAgain: 'Volver a iniciar sesión',
     tryAgain: 'Intentar de nuevo',
     staffOnly: 'Solo para personal de la clínica. El acceso usa su cuenta de la clínica y una aplicación autenticadora; la actividad queda registrada.',
     firstTimeTitle: '¿Es su primera vez?',

@@ -8,8 +8,16 @@ import type { CalendarEvent } from '@/lib/types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// Prototype "today" anchor — all mock data is relative to Apr 14, 2026
-const PROTOTYPE_TODAY = new Date(2026, 3, 14);
+// "Today" for the calendar: the real date, so MA-confirmed bookings (incl. Epic sandbox ones) show up
+// where expected. (Was a fixed Apr 14, 2026 anchor for the old mock data.)
+const PROTOTYPE_TODAY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+
+/** Appointment days are stored without a year ("Tue Nov 17"): use the year that puts the date nearest today. */
+function yearNearToday(month: number, day: number): number {
+  const y = PROTOTYPE_TODAY.getFullYear();
+  const dist = (yy: number) => Math.abs(new Date(yy, month, day).getTime() - PROTOTYPE_TODAY.getTime());
+  return [y - 1, y, y + 1].reduce((best, yy) => (dist(yy) < dist(best) ? yy : best), y);
+}
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -53,12 +61,12 @@ function parseEventDate(dayStr: string, timeStr: string): Date {
   if (month !== -1 && !isNaN(day)) {
     // Handle both "2:00 PM" and "2 PM" (no minutes)
     const m = timeStr.toLowerCase().match(/(\d+)(?::(\d+))?\s*(am|pm)/);
-    if (!m) return new Date(2026, month, day, 9, 0);
+    if (!m) return new Date(yearNearToday(month, day), month, day, 9, 0);
     let h = parseInt(m[1], 10);
     const min = m[2] ? parseInt(m[2], 10) : 0;
     if (m[3] === 'pm' && h !== 12) h += 12;
     if (m[3] === 'am' && h === 12) h = 0;
-    return new Date(2026, month, day, h, min);
+    return new Date(yearNearToday(month, day), month, day, h, min);
   }
   // Fallback for non-standard strings (e.g. "June 8, 2026")
   const fallback = new Date(dayStr);
@@ -182,7 +190,7 @@ function ApptChip({ event, compact, onClick, highlighted }: {
       )}
       {!event.isShadow && !compact && (
         <div style={{ fontSize: 10, opacity: 0.65, marginTop: 1 }}>
-          {event.provider} · {event.time}
+          {event.provider} · {event.time}{event.bookedInEpic ? ' · Epic' : ''}
         </div>
       )}
     </div>
@@ -317,8 +325,13 @@ function EventModal({
                 padding: '5px 11px', borderRadius: 6, fontSize: 12, fontWeight: 500,
                 marginBottom: 14,
               }}>
-                <Icon name="check" size={12} /> Confirmed · mirrored to shadow calendar
+                <Icon name="check" size={12} /> {event.bookedInEpic ? 'Confirmed · booked in Epic sandbox (prototype)' : 'Confirmed · mirrored to shadow calendar'}
               </div>
+              {event.bookedInEpic && (
+                <div style={{ fontSize: 12, color: 'var(--relay-ink-3)', marginBottom: 12, lineHeight: 1.5 }}>
+                  Edits or deletes here change Relay only. Epic has no cancel by API, so change the appointment in Epic too.
+                </div>
+              )}
               {!event.isShadow && (
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn btn-sm" style={{ flex: 1 }} onClick={() => setEditMode(true)}>
@@ -633,7 +646,7 @@ export default function CalendarPage() {
                 <div
                   onMouseDown={e => {
                     e.preventDefault();
-                    const year = 2026;
+                    const year = yearNearToday(dateQuery.month, dateQuery.day ?? 1);
                     const target = new Date(year, dateQuery.month, dateQuery.day ?? 1);
                     setWeekStart(getWeekStart(target));
                     if (dateQuery.day !== undefined) setSelectedDay(target);
@@ -1023,7 +1036,7 @@ export default function CalendarPage() {
       {/* Info strip */}
       <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--relay-tint)', border: '1px solid var(--relay-hairline)', borderRadius: 6, fontSize: 12.5, color: 'var(--relay-ink-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <Icon name="info" size={12} />
-        Shadow entries (dashed) are read-only mirror views of AI-captured slots pending MA confirmation. Navigation range: Mar 17, 2026 – Apr 14, 2028.
+        Shadow entries (dashed) are read-only mirror views of AI-captured slots pending MA confirmation. Navigation range: 4 weeks back to 2 years ahead.
       </div>
 
       {/* Event detail modal */}
