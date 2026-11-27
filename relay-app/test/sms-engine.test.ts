@@ -238,15 +238,22 @@ describe('red tier [BLOCKER]', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('case 20: crisis → crisis_reply (988); later texts get one short line, no AI call', async () => {
+  it('case 20: crisis → crisis_reply (988) once; texting continues and the 988 text is never repeated (owner decision 2026-11-27)', async () => {
     const h = harness(db, () => turn({ escalation: red('suicide_self_harm'), use_template: 'crisis_reply' }));
     await runOutreachTick(h.deps);
     await say(h, "honestly what's the point i want to kill myself");
     expect(h.provider.sent.at(-1)!.body).toContain('988');
-    const calls = h.model.calls.length;
+    expect(await referralState(db, ref)).toBe('Escalated');
+    // Another red turn: staff are alerted again, but no second 988 text.
+    const n = h.provider.sent.length;
+    await say(h, 'i still feel like that');
+    expect(h.provider.sent.length).toBe(n);
+    // An ordinary message gets an ordinary reply (not paused).
+    h.model.script = () => turn({ reply_text: "We're here to help. Would you like to pick a time?" });
     await say(h, 'whatever');
-    expect((await templates()).at(-1)).toBe('red_followup_crisis');
-    expect(h.model.calls.length).toBe(calls);
+    expect((await templates()).at(-1)).toBe('ai');
+    expect((await templates()).filter(t => t === 'crisis_reply')).toHaveLength(1);
+    expect(await referralState(db, ref)).toBe('Escalated');
   });
 
   it('case 25: emergency after opt-out → Escalated, no SMS sent', async () => {
@@ -317,13 +324,17 @@ describe('opt-out, help, wrong number [BLOCKER]', () => {
 });
 
 describe('minors and cadence', () => {
-  it('case 29: minor on file → no texts at all, amber minor', async () => {
+  it('case 29: minor on file → the parent gets first_outreach_guardian and verifies with the child\'s DOB (owner decision 2026-11-27)', async () => {
     await db.query(`update patients set date_of_birth = '2011-05-01'`);
-    const h = harness(db);
+    const h = harness(db, input => turn({ identity: { dob_candidate: '2011-05-01', says_not_patient: false, says_is_proxy: false }, intent: 'identity_response', language: input.context.locked_language }));
     const t = await runOutreachTick(h.deps);
-    expect(t.sent).toBe(0);
-    expect(h.provider.sent).toHaveLength(0);
-    expect(await openAmber(db, ref)).toEqual(['minor']);
+    expect(t.sent).toBe(1);
+    expect((await templates()).at(-1)).toBe('first_outreach_guardian');
+    expect(h.provider.sent[0].body).toMatch(/Grace's date of birth/);
+    expect(await openAmber(db, ref)).toEqual([]);
+    await say(h, '05/01/2011');
+    expect((await templates()).at(-1)).toBe('slot_offer');
+    expect(h.model.calls.at(-1)!.context.patient_is_minor).toBe(true);
   });
 
   it('case 39: no reply → 4 texts on days 0/2/5/9 inside the window, then cadence_exhausted, no 5th', async () => {
@@ -450,18 +461,18 @@ describe('fail-safes', () => {
 });
 
 describe('amber tier keeps the referral state (R2)', () => {
-  it('case 12: caregiver → human_handoff, amber proxy_or_caregiver, state unchanged, thread paused', async () => {
+  it('case 12: caregiver → proxy_reply, amber proxy_or_caregiver, state unchanged; later texts still answered (2026-11-27)', async () => {
     const h = harness(db, () => turn({ language: 'es', intent: 'proxy_or_caregiver', escalation: amber('proxy_or_caregiver'), identity: { dob_candidate: null, says_not_patient: false, says_is_proxy: true } }));
     await runOutreachTick(h.deps);
     await say(h, 'soy la hija, mi mamá no sabe usar el celular. ¿para qué es la cita?');
-    expect((await templates()).at(-1)).toBe('human_handoff');
+    expect((await templates()).at(-1)).toBe('proxy_reply');
     expect(await openAmber(db, ref)).toEqual(['proxy_or_caregiver']);
     expect(await referralState(db, ref)).toBe('In Progress');
-    // Paused: the next ordinary message gets no reply.
+    // Follow-up texts stop, but the next message is still answered (owner decision 2026-11-27).
     h.model.script = () => turn({ reply_text: 'Anything else?' });
     const n = h.provider.sent.length;
     await say(h, 'hola?');
-    expect(h.provider.sent.length).toBe(n);
+    expect(h.provider.sent.length).toBe(n + 1);
   });
 
   it('case 8: cost question → amber without pause, scheduling continues', async () => {
@@ -473,7 +484,7 @@ describe('amber tier keeps the referral state (R2)', () => {
       escalation: amber('cost_insurance_question', false), friction: ['cost'],
     });
     await say(h, "how much is this gonna cost me? i don't have insurance");
-    expect((await templates()).at(-1)).toBe('ai');
+    expect((await templates()).at(-1)).toBe('cost_question'); // fixed line (owner review 2026-11-27)
     h.model.script = input => turn({ captured_slot: { slot_id: input.context.offered_slots[0].slot_id, patient_text: '1' }, use_template: 'slot_captured' });
     await say(h, '1');
     expect(await referralState(db, ref)).toBe('Pending Confirmation');
@@ -489,5 +500,33 @@ describe('mock model (local demo stand-in)', () => {
     await say(h, '2');
     expect(await templates()).toEqual(['first_outreach', 'slot_offer', 'slot_captured']);
     expect(await referralState(db, ref)).toBe('Pending Confirmation');
+  });
+});
+
+describe('"none of these work" with no other open times (owner, phone test 2026-11-27)', () => {
+  it('first says these are the only open times (no staff alert), then notes it for staff — never "please call"', async () => {
+    const h = harness(db);
+    await runOutreachTick(h.deps);
+    await verify(h);
+    // The model hands off right away and even picks call_for_help — as it did in the phone test.
+    h.model.script = () => turn({ intent: 'no_slot_works', use_template: 'call_for_help', escalation: amber('no_slot_works', true) });
+    await say(h, 'Neither of these times work');
+    expect((await templates()).at(-1)).toBe('only_times_available');
+    expect(h.provider.sent.at(-1)!.body).toMatch(/^Sorry, those are the only times we have open right now\. Could one of them work\?/);
+    expect(await openAmber(db, ref)).toEqual([]);
+
+    await say(h, 'none of them, I work mornings');
+    expect((await templates()).at(-1)).toBe('no_slot_noted');
+    expect(h.provider.sent.at(-1)!.body).toMatch(/We noted what works for you, and our team will look for another time/);
+    expect(await openAmber(db, ref)).toEqual(['no_slot_works']);
+    expect((await templates())).not.toContain('call_for_help');
+
+    // Still talking afterwards: a pick is captured as usual.
+    h.model.script = input => turn({
+      intent: 'slot_selected', use_template: 'slot_captured',
+      captured_slot: { slot_id: input.context.offered_slots[0].slot_id, patient_text: '1' },
+    });
+    await say(h, 'ok actually 1 works');
+    expect((await templates()).at(-1)).toBe('slot_captured');
   });
 });

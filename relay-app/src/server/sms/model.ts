@@ -18,7 +18,13 @@ export interface SmsAgentModel {
   readonly name: 'mock' | 'bedrock' | 'scripted';
   /** Returns the raw tool input (validated by the caller), or throws on transport errors. */
   turn(input: ModelInput): Promise<unknown>;
+  /** Translates a fixed SMS text into another language (owner decision 2026-11-27). Optional. */
+  translate?(text: string, language: string): Promise<string | null>;
 }
+
+const TRANSLATE_PROMPT = 'You translate short text messages from a clinic to a patient. Translate the message into the language named by the user. '
+  + 'Keep every phone number, date, time, number, the numbers 911 and 988, and the words STOP, START and HELP exactly as written. '
+  + 'Use plain, polite, everyday words. Reply with only the translated message, nothing else.';
 
 // ── Mock ────────────────────────────────────────────────────────────────────
 
@@ -208,6 +214,21 @@ export class BedrockSmsAgentModel implements SmsAgentModel {
       });
     }
     return this.client;
+  }
+
+  async translate(text: string, language: string): Promise<string | null> {
+    const modelId = process.env.BEDROCK_MODEL_ID || DEFAULT_BEDROCK_MODEL_ID;
+    const { ConverseCommand } = await import('@aws-sdk/client-bedrock-runtime');
+    const client = await this.getClient();
+    const res = await client.send(new ConverseCommand({
+      modelId,
+      system: [{ text: TRANSLATE_PROMPT }],
+      messages: [{ role: 'user', content: [{ text: `Language: ${language}\n\nMessage:\n${text}` }] }],
+      inferenceConfig: { maxTokens: 800 },
+    } as never), { abortSignal: AbortSignal.timeout(20_000) });
+    const out = (res as { output?: { message?: { content?: { text?: string }[] } } }).output?.message?.content
+      ?.map(c => c.text ?? '').join('').trim();
+    return out || null;
   }
 
   async turn(input: ModelInput): Promise<unknown> {

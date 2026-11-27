@@ -18,7 +18,7 @@ import { getSmsProvider, smsProviderName } from './provider';
 import * as repo from './repo';
 import { staffActor } from './repo';
 import { ageOn, clinicTimeZone, DEFAULT_OUTREACH_SETTINGS } from './schedule';
-import { OUTREACH_STEPS } from './templates';
+import { DEFAULT_CLINIC_ADDRESS, OUTREACH_STEPS } from './templates';
 
 export { SmsActionError };
 
@@ -27,6 +27,10 @@ export function clinicDisplayName(): string {
 }
 export function clinicPhoneNumber(): string {
   return process.env.CLINIC_PHONE_NUMBER || '(401) 274-6347';
+}
+
+export function clinicAddress(): string {
+  return process.env.CLINIC_ADDRESS || DEFAULT_CLINIC_ADDRESS;
 }
 
 export async function smsDeps(): Promise<SmsDeps> {
@@ -39,6 +43,7 @@ export async function smsDeps(): Promise<SmsDeps> {
     tz: clinicTimeZone(),
     clinicName: clinicDisplayName(),
     clinicPhone: clinicPhoneNumber(),
+    clinicAddress: clinicAddress(),
     providers: raw.practiceProfile.providers,
     specialty: getOrg().specialty,
   };
@@ -178,7 +183,7 @@ export async function receiveInboundSms(input: { from: string; body: string; pro
   try { provider = getSmsProvider(); } catch (err) { logInboundSetup('provider', err); provider = brokenProvider(err); }
   const d: SmsDeps = {
     db: await getDb(), provider, model, now: () => new Date(), tz: clinicTimeZone(),
-    clinicName: clinicDisplayName(), clinicPhone: clinicPhoneNumber(),
+    clinicName: clinicDisplayName(), clinicPhone: clinicPhoneNumber(), clinicAddress: clinicAddress(),
     providers: raw.practiceProfile.providers, specialty: getOrg().specialty,
   };
   return handleInbound(d, { ...input, provider: input.provider ?? 'aws' });

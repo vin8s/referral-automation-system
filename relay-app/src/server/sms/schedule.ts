@@ -100,12 +100,17 @@ export function isWithinSendWindow(now: Date, s: OutreachSettings, tz = clinicTi
 }
 
 /**
- * Phone-test override: SMS_TEST_ANY_TIME=on lets texts go out on any day at any hour, but ONLY
- * when SMS_ALLOWED_NUMBERS is also set (the server can text nothing but the listed test phones)
- * and never in production. Real patients always get the R7.1 window.
+ * Test/demo override: SMS_TEST_ANY_TIME=on lets texts go out on any day at any hour (24/7), but
+ * never in production, and only when no real patient can be texted:
+ *   - the mock provider (demos: texts only appear in the app, nothing reaches a phone), or
+ *   - a real provider with SMS_ALLOWED_NUMBERS set (phone test: only the listed test phones).
+ * Real patients always get the R7.1 window.
  */
 export function testAnyTime(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.SMS_TEST_ANY_TIME === 'on' && !!allowedNumbers(env) && env.NODE_ENV !== 'production';
+  if (env.SMS_TEST_ANY_TIME !== 'on' || env.NODE_ENV === 'production') return false;
+  const provider = env.SMS_PROVIDER?.toLowerCase();
+  const realProvider = provider === 'aws' || provider === 'twilio';   // same rule as smsProviderName()
+  return !realProvider || !!allowedNumbers(env);
 }
 
 /** Start of the next allowed window (now if already inside one). */

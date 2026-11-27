@@ -19,6 +19,10 @@ export type AmberCode = typeof AMBER_CODES[number] | typeof CODE_AMBER_CODES[num
 export const MODEL_TEMPLATES = [
   'emergency_reply', 'crisis_reply', 'stop_confirmation', 'help_reply', 'wrong_number',
   'identity_not_verified', 'human_handoff', 'slot_captured', 'slot_offer',
+  // Owner review 2026-11-27: "call the office" lines instead of a staff handoff.
+  'clinic_contact', 'call_for_help', 'proxy_reply', 'cost_question', 'cancel_by_phone',
+  // Phone test 2026-11-27: still no time works after "these are the only open times".
+  'no_slot_noted',
 ] as const;
 export type ModelTemplate = typeof MODEL_TEMPLATES[number];
 
@@ -58,6 +62,8 @@ export interface SmsTurnOutput {
   wrong_number: boolean;
   call_outcome: typeof CALL_OUTCOMES[number] | null;
   conversation_complete: boolean;
+  /** Set when the reply is in a language other than English/Spanish (e.g. "Portuguese"). Optional. */
+  reply_language?: string | null;
 }
 
 /** A slot offered to the patient (turn context `offered_slots`). */
@@ -91,6 +97,12 @@ export interface TurnContext {
   booked_appointment: { label: string } | null;
   redirects_used: number;
   ai_messages_today: number;
+  /** Language other than English/Spanish the patient writes in (e.g. "Portuguese"), or null. */
+  reply_language?: string | null;
+  /** Patient on file is under 18: the person texting is the parent or guardian. */
+  patient_is_minor?: boolean;
+  /** The 911/988 text was already sent in this conversation (it is never repeated). */
+  emergency_text_sent?: boolean;
 }
 
 export interface HistoryTurn {

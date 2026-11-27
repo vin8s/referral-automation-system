@@ -129,9 +129,23 @@ describe('precedence (red > opt_out > wrong_number > amber > captured_slot > rep
   it('wrong number beats amber', () => {
     expect(resolveDecision(out({ wrong_number: true, escalation: amber('wrong_number', true) }), opts).kind).toBe('wrong_number');
   });
-  it('amber with pause beats a captured slot and defaults to human_handoff', () => {
+  it('amber with pause beats a captured slot; the AI reply is kept when there is one', () => {
     const d = resolveDecision(out({ escalation: amber('clinical_question', true), captured_slot: { slot_id: 's_a', patient_text: '1' }, reply_text: 'hi' }), opts);
-    expect(d).toMatchObject({ kind: 'amber', template: 'human_handoff', alsoCapture: null });
+    expect(d).toMatchObject({ kind: 'amber', template: null, replyText: 'hi', alsoCapture: null });
+  });
+  it('a person request with no reply defaults to human_handoff; no_slot_works to no_slot_noted', () => {
+    expect(resolveDecision(out({ escalation: amber('human_requested', true) }), opts)).toMatchObject({ kind: 'amber', template: 'human_handoff' });
+    expect(resolveDecision(out({ escalation: amber('no_slot_works', true) }), opts)).toMatchObject({ kind: 'amber', template: 'no_slot_noted' });
+  });
+  it('owner review 2026-11-27: some reasons always get their fixed line, whatever the model wrote', () => {
+    const fixed = (code: string) => resolveDecision(out({ escalation: amber(code, false), reply_text: 'AI words' }), opts);
+    expect(fixed('cost_insurance_question')).toMatchObject({ template: 'cost_question', replyText: null });
+    expect(fixed('proxy_or_caregiver')).toMatchObject({ template: 'proxy_reply', replyText: null });
+    expect(fixed('appointment_change')).toMatchObject({ template: 'cancel_by_phone', replyText: null });
+    expect(fixed('off_topic_repeated')).toMatchObject({ template: 'call_for_help', replyText: null });
+    // A template the reason doesn't allow is ignored (the AI reply is used instead).
+    expect(resolveDecision(out({ escalation: amber('clinical_question', false), use_template: 'cost_question', reply_text: 'x' }), opts))
+      .toMatchObject({ template: null, replyText: 'x' });
   });
   it('amber without pause still lets a valid slot through', () => {
     const d = resolveDecision(out({ escalation: amber('transport_assistance', false), captured_slot: { slot_id: 's_b', patient_text: 'wed' } }), opts);

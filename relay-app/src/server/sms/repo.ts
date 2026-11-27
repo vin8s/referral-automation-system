@@ -173,6 +173,8 @@ export async function setReferralState(q: Queryable, referralId: string, state: 
 export interface Conv {
   referralId: string;
   lockedLanguage: Lang | null;
+  /** A language other than English/Spanish the patient writes in (e.g. 'Portuguese'); null for en/es. */
+  replyLanguage: string | null;
   identityVerified: boolean;
   identityVerifiedAt: Date | null;
   identityAttempts: number;
@@ -209,6 +211,7 @@ function toConv(r: ConvRow): Conv {
   return {
     referralId: r.referral_id as string,
     lockedLanguage: (r.locked_language as Lang | null) ?? null,
+    replyLanguage: (r.reply_language as string | null) ?? null,
     identityVerified: r.identity_verified as boolean,
     identityVerifiedAt: (r.identity_verified_at as Date | null) ?? null,
     identityAttempts: r.identity_attempts as number,
@@ -248,7 +251,7 @@ export async function findConv(q: Queryable, referralId: string): Promise<Conv |
 }
 
 const CONV_COLUMNS: Record<keyof Omit<Conv, 'referralId'>, { col: string; json?: boolean }> = {
-  lockedLanguage: { col: 'locked_language' }, identityVerified: { col: 'identity_verified' },
+  lockedLanguage: { col: 'locked_language' }, replyLanguage: { col: 'reply_language' }, identityVerified: { col: 'identity_verified' },
   identityVerifiedAt: { col: 'identity_verified_at' }, identityAttempts: { col: 'identity_attempts' },
   offeredSlots: { col: 'offered_slots', json: true }, rejectedSlotKeys: { col: 'rejected_slot_keys', json: true },
   capturedSlotId: { col: 'captured_slot_id' }, preferences: { col: 'preferences', json: true },

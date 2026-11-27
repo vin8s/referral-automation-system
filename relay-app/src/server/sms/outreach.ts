@@ -9,13 +9,13 @@
 // approve it on the dashboard ("Ready to text").
 //
 // Rules (AGENT_SAFETY_RULES R6, R7): pause switch, quiet hours, cadence 0/2/5/9,
-// 48h spacing, 1 per day, lifetime cap 6, consent + opt-out, never text minors,
-// English/Spanish only, amber cadence_exhausted 72h after the final attempt.
+// 48h spacing, 1 per day, lifetime cap 6, opt-out; minors via the parent (2026-11-27),
+// any language (fixed texts translated, 2026-11-27), amber cadence_exhausted 72h after the final attempt.
 
 import { isAllowedNumber } from './allowlist';
 import 'server-only';
 import { logError } from '@/server/log';
-import { flushHeld, sendTemplate, sweepUnprocessedInbound, type SmsDeps } from './engine';
+import { flushHeld, otherLanguageName, sendTemplate, sweepUnprocessedInbound, type SmsDeps } from './engine';
 import * as repo from './repo';
 import { AI_ACTOR, SYSTEM_ACTOR } from './repo';
 import { ageOn, cadenceVerdict, isWithinSendWindow } from './schedule';
@@ -82,17 +82,13 @@ export async function runOutreachTick(d: SmsDeps): Promise<TickResult> {
     if (!ref.phone) { skip('no phone'); return; }
     if (!isAllowedNumber(ref.phone)) { skip('not on test-phone allowlist'); return; }
 
-    // Minors: never text (R7.4). Unsupported language: staff + interpreter (R8.3).
-    if (ref.dobIso && ageOn(ref.dobIso, now, d.tz) < 18) {
-      await repo.getConv(q, ref.id);
-      await amber(ref, 'minor', 'Patient is under 18 on file — not texted. Staff to contact the family.');
-      skip('minor'); return;
-    }
-    if (!repo.langFromPatient(ref.language)) {
-      await repo.getConv(q, ref.id);
-      await amber(ref, 'language_barrier', `Preferred language on file is ${ref.language}. Texting supports English and Spanish only.`);
-      skip('language not supported'); return;
-    }
+    // Owner decisions 2026-11-27 (replace R7.4 / R8.3 for texting):
+    //  - Patient under 18 on file: the phone on file is the parent's. Their first text asks for the
+    //    CHILD's date of birth (first_outreach_guardian); after that the parent schedules normally.
+    //  - Preferred language other than English/Spanish: texts go out in that language (fixed texts
+    //    translated by the AI, see engine.translateIfNeeded).
+    const isMinor = !!ref.dobIso && ageOn(ref.dobIso, now, d.tz) < 18;
+    const otherLanguage = repo.langFromPatient(ref.language) ? null : otherLanguageName(ref.language);
 
     const verdict = cadenceVerdict({
       cycleStep: conv?.cycleStep ?? 0,
@@ -116,7 +112,7 @@ export async function runOutreachTick(d: SmsDeps): Promise<TickResult> {
 
     const c = await repo.getConv(q, ref.id);
     const step = verdict.step;
-    const templateId = OUTREACH_STEPS[step] ?? 'final_attempt';
+    const templateId = step === 0 && isMinor ? 'first_outreach_guardian' : (OUTREACH_STEPS[step] ?? 'final_attempt');
     const lang = c.lockedLanguage ?? repo.langFromPatient(ref.language) ?? 'en';
 
     if (step === 0) {
@@ -133,6 +129,7 @@ export async function runOutreachTick(d: SmsDeps): Promise<TickResult> {
       // A new conversation: identity must be checked again before any details.
       await repo.updateConv(q, ref.id, {
         cycleStartedAt: now, identityVerified: false, identityAttempts: 0, offeredSlots: [], lockedLanguage: lang,
+        ...(otherLanguage && !c.replyLanguage ? { replyLanguage: otherLanguage } : {}),
       });
     }
 

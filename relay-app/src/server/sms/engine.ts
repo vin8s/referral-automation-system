@@ -14,7 +14,8 @@ import type { Db, Queryable } from '@/server/db';
 import { logError } from '@/server/log';
 import { slotKey, takenSlotKeys } from '@/lib/slots';
 import {
-  detectEmergency, detectKeyword, dobMatches, pickDobCandidate, redTemplateFor, resolveDecision, validateModelOutput, validateOutgoing,
+  ambiguousPick, detectEmergency, detectKeyword, dobMatches, inferEscalation, pickDobCandidate, redTemplateFor, resolveDecision,
+  validateModelOutput, validateOutgoing,
 } from './guards';
 import type { SmsAgentModel } from './model';
 import { phoneKey, type SmsProvider } from './provider';
@@ -25,7 +26,7 @@ import { ageOn, isWithinSendWindow, localDate, nextSendWindow, zonedParts, type 
 import { buildOfferedSlots, buildOpenSlotPool } from './slots';
 import { epicOpenSlots, pickSpread } from './epicSlots';
 import { specialtyPhrase } from './specialty';
-import { IMMEDIATE_TEMPLATES, renderTemplate, type Lang, type TemplateId, type TemplateVars } from './templates';
+import { DEFAULT_CLINIC_ADDRESS, IMMEDIATE_TEMPLATES, renderTemplate, type Lang, type TemplateId, type TemplateVars } from './templates';
 import type { HistoryTurn, ModelInput, OfferedSlot, RedCode, SmsTurnOutput, TurnContext } from './types';
 
 export interface SmsDeps {
@@ -36,6 +37,8 @@ export interface SmsDeps {
   tz: string;
   clinicName: string;
   clinicPhone: string;
+  /** Street address for booked_confirmation (CLINIC_ADDRESS). Defaults to DEFAULT_CLINIC_ADDRESS. */
+  clinicAddress?: string;
   /** Provider names used when offering slots. */
   providers: string[];
   /** Practice specialty — never sent to the model, only used by the outbound guard. */
@@ -127,12 +130,20 @@ const traces = new WeakMap<SmsDeps, TurnTrace>();
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Pauses that also silence replies to the patient (the rest only stop follow-up texts). */
+export function silentPause(reason: string | null): boolean {
+  if (!reason) return true;
+  return reason === 'staff' || reason === 'opted_out' || reason.startsWith('red:')
+    || ['amber:identity_failed', 'amber:agent_error', 'amber:wrong_number'].includes(reason);
+}
+
 function langFor(ref: RefCtx, conv: Conv): Lang {
   return conv.lockedLanguage ?? repo.langFromPatient(ref.language) ?? 'en';
 }
 
 function baseVars(d: SmsDeps, ref: RefCtx): TemplateVars {
-  return { patient_first_name: ref.firstName, clinic_name: d.clinicName, clinic_phone: d.clinicPhone, location_short: ref.location };
+  return { patient_first_name: ref.firstName, clinic_name: d.clinicName, clinic_phone: d.clinicPhone, location_short: ref.location,
+    clinic_address: d.clinicAddress || DEFAULT_CLINIC_ADDRESS };
 }
 
 function slotLabel(slot: OfferedSlot, lang: Lang): string {
@@ -187,9 +198,10 @@ async function raiseRed(d: SmsDeps, ref: RefCtx, code: RedCode, summary: string)
   await repo.escalateReferral(q, ref.id, `${code.replaceAll('_', ' ')} (SMS): ${summary}`, d.now());
   const trace = traces.get(d);
   if (trace) trace.alerts++;
-  await repo.updateConv(q, ref.id, { paused: true, pausedReason: `red:${code}` });
+  // Owner decision 2026-11-27: the 911/988 text goes out once and staff get the RED item, but the
+  // conversation is NOT paused: the patient can keep scheduling by text.
   await repo.setSmsAttemptOutcome(q, ref.id, 'Escalated', `Escalated by SMS agent (${code.replaceAll('_', ' ')}).`);
-  await repo.audit(q, AI_ACTOR, ref.id, 'sms.escalate', `Escalated — ${code.replaceAll('_', ' ')} (SMS). All texting paused.`);
+  await repo.audit(q, AI_ACTOR, ref.id, 'sms.escalate', `Escalated — ${code.replaceAll('_', ' ')} (SMS). Emergency text sent; texting continues.`);
 }
 
 // ── Sending ─────────────────────────────────────────────────────────────────
@@ -302,7 +314,37 @@ export async function sendTemplate(
     delete vars.specialty_phrase;
   }
   const { text } = renderTemplate(id, lang, vars);
-  return sendSms(d, ref, { body: text, author: 'template', templateKey: id, immediate: IMMEDIATE_TEMPLATES.has(id), ...opts });
+  const body = await translateIfNeeded(d, ref, id, text);
+  return sendSms(d, ref, { body, author: 'template', templateKey: id, immediate: IMMEDIATE_TEMPLATES.has(id), ...opts });
+}
+
+/** Fixed texts the carriers expect as written (keywords, rates): never machine-translated. */
+const UNTRANSLATED = new Set<TemplateId>(['stop_confirmation', 'help_reply']);
+
+/**
+ * Owner decision 2026-11-27: patients who write in a language other than English/Spanish get every
+ * fixed text translated by the AI. On any failure the English/Spanish text goes out unchanged.
+ */
+async function translateIfNeeded(d: SmsDeps, ref: RefCtx, id: TemplateId, text: string): Promise<string> {
+  if (UNTRANSLATED.has(id) || !d.model.translate) return text;
+  const conv = await repo.findConv(d.db, ref.id);
+  if (!conv?.replyLanguage) return text;
+  try {
+    const t = await withTimeout(d.model.translate(text, conv.replyLanguage), d.modelTimeoutMs ?? MODEL_TIMEOUT_MS, 'translate');
+    return t && t.trim() ? cleanText(t.trim()) : text;
+  } catch (err) {
+    logError('sms translate', err);
+    return text;
+  }
+}
+
+/** A language name from the model, kept only if it's a plausible name and not English/Spanish. */
+export function otherLanguageName(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  if (!/^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ ()'-]{1,29}$/.test(s)) return null;
+  if (/^(en|es|eng|english|ingl[eé]s|spanish|espa[nñ]ol|castellano)$/i.test(s)) return null;
+  return s[0].toUpperCase() + s.slice(1);
 }
 
 /** Sends previously held messages whose window has opened (called by the outreach tick). */
@@ -495,7 +537,8 @@ async function processInbound(d: SmsDeps, input: InboundInput, ref: RefCtx, msgI
     return { referralId: ref.id, outcome: 'stored (opted out / suppressed)', silentOk: true };
   }
 
-  // 4. Already red: only the short supportive line, never scheduling (R1.2.5)
+  // 4. Already red (older conversations paused by a red, before 2026-11-27): one short line only.
+  // New reds no longer pause: the 911/988 text goes out once and scheduling continues (owner decision).
   const lang = langFor(ref, conv);
   if (ref.state === 'Escalated' && conv.pausedReason?.startsWith('red:')) {
     const crisis = conv.pausedReason === 'red:suicide_self_harm' || backstop?.code === 'suicide_self_harm';
@@ -515,9 +558,10 @@ async function processInbound(d: SmsDeps, input: InboundInput, ref: RefCtx, msgI
     return { referralId: ref.id, outcome: 'stored (all texting paused)' };
   }
 
-  // Per-thread pause (amber) or staff turned SMS off: the AI still screens for safety,
-  // but nothing except red / opt-out / wrong-number is acted on.
-  const safetyOnly = conv.paused || conv.channelPreference !== 'sms' || conv.exhausted;
+  // Staff pause, opt-out, failed identity check or a broken AI turn: the AI still screens for safety,
+  // but nothing except red / opt-out / wrong-number is acted on. Other "needs a human" pauses only
+  // stop the automatic follow-up texts: the patient still gets answers (owner decision 2026-11-27).
+  const safetyOnly = (conv.paused && silentPause(conv.pausedReason)) || conv.channelPreference !== 'sms' || conv.exhausted;
 
   // Identity re-verification window (R4.4)
   if (conv.identityVerified && !identityStillValid(conv, now)) {
@@ -625,6 +669,9 @@ async function buildTurnContext(d: SmsDeps, ref: RefCtx, conv: Conv, isNew: bool
     today_date: now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: d.tz }),
     is_new_conversation: isNew,
     locked_language: langFor(ref, conv),
+    reply_language: conv.replyLanguage,
+    patient_is_minor: !!ref.dobIso && ageOn(ref.dobIso, now, d.tz) < 18,
+    emergency_text_sent: ref.state === 'Escalated',
     identity_verified: verified,
     identity_attempts: conv.identityAttempts,
     referring_provider: verified ? ref.referringProvider || null : null,
@@ -662,6 +709,10 @@ interface TurnState {
 
 async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput, st: TurnState): Promise<InboundResult> {
   const q = d.db;
+  out = inferEscalation(out, {
+    body: st.body, identityVerified: conv.identityVerified,
+    patientIsMinor: !!ref.dobIso && ageOn(ref.dobIso, d.now(), d.tz) < 18,
+  });
   const decision = resolveDecision(out, {
     backstop: st.backstop, identityVerified: conv.identityVerified, offeredSlotIds: [...conv.offeredSlots, ...st.pool].map(s => s.slot_id),
   });
@@ -676,6 +727,17 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
   } else if (!conv.lockedLanguage) {
     await repo.updateConv(q, ref.id, { lockedLanguage: lang });
   }
+  st.lang = lang; // fallbacks (e.g. identity_ask) go out in the switched language
+  // Any other language the patient writes in (owner decision 2026-11-27): kept until they switch to en/es.
+  const other = otherLanguageName(out.reply_language);
+  if (other && other !== conv.replyLanguage) {
+    await repo.updateConv(q, ref.id, { replyLanguage: other });
+    conv.replyLanguage = other;
+    await repo.audit(q, AI_ACTOR, ref.id, 'sms.language', `Texting in ${other} (patient wrote in ${other}); fixed texts are translated by the AI`);
+  } else if (!other && conv.replyLanguage && out.language_switch_request) {
+    await repo.updateConv(q, ref.id, { replyLanguage: null });
+    conv.replyLanguage = null;
+  }
 
   // Bookkeeping that never sends anything
   const patch: Partial<Conv> = {};
@@ -685,10 +747,14 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
   if (Object.keys(patch).length) await repo.updateConv(q, ref.id, patch);
 
   switch (decision.kind) {
-    case 'red':
+    case 'red': {
+      const alreadySent = ref.state === 'Escalated';
       await raiseRed(d, ref, decision.code, summary ? `${summary} — ${st.quote}` : st.quote);
-      await sendTemplate(d, ref, decision.template, lang);
-      return { referralId: ref.id, outcome: `red ${decision.code}` };
+      // The 911/988 text goes out once per conversation (owner decision 2026-11-27); staff still get
+      // every new red, and a later red turn sends nothing rather than repeating the text.
+      if (!alreadySent) await sendTemplate(d, ref, decision.template, lang);
+      return { referralId: ref.id, outcome: `red ${decision.code}${alreadySent ? ' (text already sent)' : ''}`, silentOk: alreadySent };
+    }
 
     case 'opt_out':
       await repo.setOptOut(q, ref.patientId, true, 'natural-language opt-out', d.now());
@@ -720,7 +786,7 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
 
   // Identity check by code (R4.2) — when the patient's text or the model holds a DOB and no handoff applies.
   // Code's parse of the patient's own words wins; the model's extraction is the fallback (one guess per text).
-  const handoff = decision.kind === 'amber' && decision.pause;
+  const handoff = decision.kind === 'amber' && (decision.pause || decision.code === 'proxy_or_caregiver' || decision.code === 'minor');
   const dobCandidate = conv.identityVerified ? null : pickDobCandidate(st.body, out.identity.dob_candidate, d.now());
   if (dobCandidate && !handoff) {
     return identityStep(d, ref, conv, dobCandidate, lang);
@@ -732,6 +798,13 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
       return { referralId: ref.id, outcome: 'amber agent_error' };
 
     case 'amber': {
+      // "None of these work" with no other open times (owner, phone test 2026-11-27): the first time,
+      // say these are the only open times and keep helping — no staff alert. Only if they still can't
+      // make any of them does staff get no_slot_works (with no_slot_noted, never "please call").
+      if (decision.code === 'no_slot_works' && !decision.alsoCapture && !(await toldOnlyTimes(d, ref.id))) {
+        await sendTemplate(d, ref, 'only_times_available', lang);
+        return { referralId: ref.id, outcome: 'said these are the only open times' };
+      }
       await raiseAmber(d, ref, decision.code, summary, decision.pause);
       if (out.call_outcome) await repo.setSmsAttemptOutcome(q, ref.id, out.call_outcome);
       else if (decision.pause) await repo.setSmsAttemptOutcome(q, ref.id, 'Transferred to Staff');
@@ -746,8 +819,18 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
       return { referralId: ref.id, outcome: `amber ${decision.code}` };
     }
 
-    case 'captured':
+    case 'captured': {
+      // "the morning one" with two morning times offered: ask which, don't guess (owner review 2026-11-27).
+      const fits = ambiguousPick(st.body, conv.offeredSlots);
+      if (fits.length >= 2 && fits.some(s => s.slot_id === decision.slotId)) {
+        const labels = fits.map(s => slotLabel(s, lang));
+        const or = lang === 'es' ? ' o ' : ' or ';
+        const choices = labels.length === 2 ? labels.join(or) : `${labels.slice(0, -1).join(', ')}${or}${labels.at(-1)}`;
+        await sendTemplate(d, ref, 'slot_clarify', lang, { slot_choices: choices });
+        return { referralId: ref.id, outcome: 'asked which time (ambiguous pick)' };
+      }
       return captureStep(d, ref, conv, decision.slotId, lang, st.pool);
+    }
 
     case 'reply':
       if (decision.template) await sendModelTemplate(d, ref, conv, decision.template, lang);
@@ -758,10 +841,18 @@ async function applyTurn(d: SmsDeps, ref: RefCtx, conv: Conv, out: SmsTurnOutput
       // "ok thanks" once a time is picked / booked needs no answer. Any other empty turn is caught by ensureNotSilent.
       return {
         referralId: ref.id, outcome: 'reply',
-        silentOk: out.intent === 'acknowledgement' && (!!conv.capturedSlotId || ref.state === 'Pending Confirmation' || ref.state === 'Booked'),
+        silentOk: (out.intent === 'acknowledgement' && (!!conv.capturedSlotId || ref.state === 'Pending Confirmation' || ref.state === 'Booked'))
+          // A second "no" after declining needs no further text (the decline reply already went out).
+          || (out.intent === 'decline' && !decision.template && !decision.replyText),
       };
   }
   return { referralId: ref.id, outcome: 'none' };
+}
+
+/** Has this conversation already been told "those are the only times we have open"? */
+async function toldOnlyTimes(d: SmsDeps, referralId: string): Promise<boolean> {
+  const rows = await repo.listMessages(d.db, referralId);
+  return rows.some(m => m.direction === 'outbound' && m.template_key === 'only_times_available' && m.status !== 'failed');
 }
 
 async function sendModelTemplate(d: SmsDeps, ref: RefCtx, conv: Conv, template: string, lang: Lang) {
@@ -843,7 +934,7 @@ async function captureStep(d: SmsDeps, ref: RefCtx, conv: Conv, slotId: string, 
   }
   if (ref.state === 'Booked') {
     await raiseAmber(d, ref, 'appointment_change', 'Patient with a Booked appointment picked a new time by text.', true);
-    await sendTemplate(d, ref, 'human_handoff', lang);
+    await sendTemplate(d, ref, 'cancel_by_phone', lang);
     return { referralId: ref.id, outcome: 'amber appointment_change' };
   }
   // A slot taken by someone else since it was offered must not be double-captured.
@@ -855,7 +946,9 @@ async function captureStep(d: SmsDeps, ref: RefCtx, conv: Conv, slotId: string, 
     return { referralId: ref.id, outcome: 'slot no longer free; re-offered' };
   }
   await repo.captureSlot(q, ref.id, slot, d.now());
-  await repo.setReferralState(q, ref.id, 'Pending Confirmation', d.now());
+  // After an emergency text the referral stays Escalated (red) until staff handle it; the picked
+  // time is still recorded on the referral.
+  if (ref.state !== 'Escalated') await repo.setReferralState(q, ref.id, 'Pending Confirmation', d.now());
   await repo.updateConv(q, ref.id, { capturedSlotId: slotId });
   await repo.setSmsAttemptOutcome(q, ref.id, 'Appointment Accepted', `Patient picked ${slot.label_en} by text. Not booked until the MA confirms.`, slot.day);
   await repo.audit(q, AI_ACTOR, ref.id, 'slot.capture', `Captured slot ${slot.day} ${slot.time} by SMS — sent to confirm queue`);

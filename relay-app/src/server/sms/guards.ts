@@ -17,7 +17,7 @@ export const MAX_SEGMENTS = 3;
 export const MAX_REPLY_CHARS = 459;
 import {
   AMBER_CODES, CALL_OUTCOMES, INTENTS, MODEL_TEMPLATES, RED_CODES,
-  type OfferedSlot, type RedCode, type SmsTurnOutput,
+  type ModelTemplate, type OfferedSlot, type RedCode, type SmsTurnOutput,
 } from './types';
 
 // ── Text normalization ──────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ const RED_PATTERNS: [RedCode, RegExp][] = [
   ['overdose_poisoning', /\b(overdos\w*|took (too many|a lot of|all (of )?my|the whole bottle|like \d+|\d+ of my)\b.*\b(pills?|meds|medicine|tablets)|took the whole bottle|swallowed (bleach|chemicals|poison|pills)|(kid|child|baby|son|daughter) swallowed)/],
   ['overdose_poisoning', /\b(muchas pastillas|sobredosis|todo el frasco|tome (cloro|quimicos|veneno)|se trago (algo|pastillas|cloro))\b/],
   // Violence / danger
-  ['violence_danger', /\b(someone|somebody|he|she|they)( is| are|s)? (hurting|beating|hitting|choking) me\b|\bnot safe (at home|here)\b|\b(going to|gonna) (hurt|kill) (me|someone|somebody|him|her|them)\b|\bbeing threatened\b|\bthreatening (to kill )?me\b/],
+  ['violence_danger', /\b(someone|somebody|he|she|they)( is| are|s)? (hurting|beating|hitting|choking) me\b|\bnot safe (at home|here)\b|\b(dont|do not) feel safe\b|\b(going to|gonna) (hurt|kill) (me|someone|somebody|him|her|them)\b|\bbeing threatened\b|\bthreatening (to kill )?me\b/],
   ['violence_danger', /\bme (esta|estan) (pegando|golpeando|amenazando)\b|\bme pega\b|\bno estoy segur[oa] en mi casa\b|\bme va a (hacer dano|matar)\b|\bvoy a (lastimar|matar) a alguien\b|\bmaltratando a\b/],
   // Medical emergency
   ['emergency_medical', /\b(cant|can not|cannot|could not|couldnt) (breathe|catch my breath)\b|\bhard to breathe\b|\bshort of breath\b|\bchoking\b|\bchest (really |is |feels )?(hurts?|hurting|tight|heavy)\b|\bpressure in my chest\b|\bchest pain.{0,40}(right now|now|today|this morning|again|came back|is back)\b|\b(having|have) (a )?(heart attack|stroke)\b|\bface (is |feels )?(drooping|numb)\b|\bnumb on one side\b|\bone side (of my (face|body) )?(is )?(numb|weak)\b|\bcant move my (arm|leg)\b|\bslurred speech\b|\bwords (are|r) coming out (weird|wrong|funny)\b|\bworst headache\b|\bpassed out\b|\bfainted\b|\bseizure\b|\bunconscious\b|\b(wont|will not|isnt|not) wak(e|ing) up\b|\bbleeding (a lot|heavily|badly)\b|\bwont stop bleeding\b|\b(coughing|throwing up|vomiting) (up )?blood\b|\bthroat (is )?closing\b|\blips (are )?swelling\b|\bwater broke\b|\bbaby (is )?not moving\b|\b(need|call) an ambulance\b|\bthis is an emergency\b|\b(i think )?im dying\b/],
@@ -592,7 +592,92 @@ export function validateOutgoing(text: string, ctx: OutgoingContext): string[] {
   return [...new Set(problems)];
 }
 
+// ── Intent → escalation (owner review 2026-11-27) ───────────────────────────
+// In the graded run the model often named the situation in `intent` / `use_template` but left the
+// escalation tier at "none", so staff were never told and the fixed line didn't go out. Code fills it in.
+
+const PROXY_RELATIVE = /\b(my|mi) (son|daughter|child|kid|baby|boy|girl|husband|wife|mom|mother|dad|father|hijo|hija|nino|nina|esposo|esposa|mama|papa)\b/;
+const BORN_WORDS = /\b(born|birthday|bday|dob|birth date|date of birth|nacio|cumpleanos|fecha de nacimiento)\b/;
+const DOCTOR_KIND = /\b(diagnos\w*|what (kind|type|sort) of (doctor|appointment|specialist|visit)|which (doctor|specialist|department)|specialist|specialty|department)\b/;
+
+/** True when the text gives a relative's birthday ("my son was born 3/4/2010"), not the patient's. */
+export function mentionsRelativeBirthday(text: string): boolean {
+  const n = normalizeText(text);
+  return PROXY_RELATIVE.test(n) && BORN_WORDS.test(n);
+}
+
+export function inferEscalation(out: SmsTurnOutput, opts: { body: string; identityVerified: boolean; patientIsMinor: boolean }): SmsTurnOutput {
+  const n = normalizeText(opts.body);
+  const amberWith = (code: string, template: ModelTemplate) => {
+    out.escalation = { tier: 'amber', reason_code: code, pause_automation: false, staff_summary: out.escalation.staff_summary };
+    out.use_template = template;
+    out.reply_text = null;
+  };
+  if (out.escalation.tier === 'none' && !out.opt_out && !out.wrong_number) {
+    const proxy = !opts.patientIsMinor && (out.intent === 'proxy_or_caregiver' || out.use_template === 'proxy_reply'
+      || (!opts.identityVerified && mentionsRelativeBirthday(opts.body)));
+    if (proxy) { amberWith('proxy_or_caregiver', 'proxy_reply'); out.identity.dob_candidate = null; }
+    else if (out.intent === 'appointment_change' || out.use_template === 'cancel_by_phone') amberWith('appointment_change', 'cancel_by_phone');
+    else if (out.intent === 'cost_insurance_question' || out.use_template === 'cost_question') amberWith('cost_insurance_question', 'cost_question');
+    else if (out.intent === 'complaint') amberWith('complaint', out.use_template === 'call_for_help' ? 'call_for_help' : 'human_handoff');
+  }
+  if (opts.identityVerified && out.escalation.tier !== 'red' && out.intent === 'clinical_question' && DOCTOR_KIND.test(n)) {
+    out.use_template = 'call_for_help';
+    out.reply_text = null;
+  }
+  return out;
+}
+
+const PART_OF_DAY: [RegExp, (h: number) => boolean][] = [
+  [/\b(morning|mornings|manana|en la manana)\b/, h => h < 12],
+  [/\b(afternoon|afternoons|tarde|en la tarde)\b/, h => h >= 12 && h < 17],
+  [/\b(evening|evenings|noche)\b/, h => h >= 17],
+];
+const SPECIFIC = /\d|\b(mon|tue|wed|thu|fri|sat|sun)\w*|\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b|\b(first|second|third|last|1st|2nd|3rd|primer[oa]?|segund[oa]|tercer[oa]?|ultim[oa])\b|\b(today|tomorrow|hoy|manana mismo)\b/;
+
+/**
+ * "the morning one" when two or more offered times are mornings: the ids that fit, so code can ask
+ * which one instead of guessing (owner review 2026-11-27, T-025). Empty when the pick is specific.
+ */
+export function ambiguousPick(text: string, slots: OfferedSlot[]): OfferedSlot[] {
+  const n = normalizeText(text);
+  if (SPECIFIC.test(n)) return [];
+  for (const [re, fits] of PART_OF_DAY) {
+    if (!re.test(n)) continue;
+    const hits = slots.filter(s => {
+      const m = s.time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+      if (!m) return false;
+      const h = (+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0);
+      return fits(h);
+    });
+    return hits.length >= 2 ? hits : [];
+  }
+  return [];
+}
+
 // ── Precedence (SMS_AGENT_PROMPT §1.3) ──────────────────────────────────────
+
+/** Amber reasons that always send one fixed line (owner review 2026-11-27). */
+const AMBER_FIXED_TEXT: Record<string, ModelTemplate> = {
+  cost_insurance_question: 'cost_question',
+  proxy_or_caregiver: 'proxy_reply',
+  minor: 'proxy_reply',
+  appointment_change: 'cancel_by_phone',
+  off_topic_repeated: 'call_for_help',
+  identity_failed: 'identity_not_verified',
+};
+/** Reasons where the model may pick among a few fixed lines. */
+const AMBER_TEMPLATE_CHOICES: Record<string, ModelTemplate[]> = {
+  human_requested: ['human_handoff', 'clinic_contact', 'call_for_help'],
+  complaint: ['human_handoff', 'call_for_help'],
+  clinical_question: ['call_for_help'],
+  confusion: ['call_for_help', 'human_handoff'],
+  no_slot_works: ['no_slot_noted'],
+};
+/** Fixed line when the model gave neither a template nor a reply. */
+const AMBER_DEFAULT_TEXT: Record<string, ModelTemplate> = {
+  human_requested: 'human_handoff', complaint: 'human_handoff', no_slot_works: 'no_slot_noted',
+};
 
 export type Decision =
   | { kind: 'red'; code: RedCode; template: 'emergency_reply' | 'crisis_reply' }
@@ -633,7 +718,12 @@ export function resolveDecision(
   if (out.escalation.tier === 'amber') {
     const pause = out.escalation.pause_automation;
     const alsoCapture = !pause ? captureId : null;
-    const template = out.use_template ?? (pause && !alsoCapture ? 'human_handoff' : null);
+    const code = out.escalation.reason_code!;
+    // Owner review 2026-11-27: these reasons always get their fixed "call the office" line.
+    const forced = AMBER_FIXED_TEXT[code];
+    const allowed = AMBER_TEMPLATE_CHOICES[code];
+    const chosen = forced ?? (out.use_template && (!allowed || allowed.includes(out.use_template)) ? out.use_template : null);
+    const template = chosen ?? (pause && !alsoCapture && !out.reply_text ? (AMBER_DEFAULT_TEXT[code] ?? 'call_for_help') : null);
     return {
       kind: 'amber', code: out.escalation.reason_code!, pause,
       template: alsoCapture ? 'slot_captured' : template,

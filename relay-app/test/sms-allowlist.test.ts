@@ -57,9 +57,16 @@ describe('SMS_TEST_ANY_TIME (phone tests only)', () => {
   it('only applies with an allowlist and outside production', async () => {
     const { testAnyTime } = await import('@/server/sms/schedule');
     const e = (o: Record<string, string>) => o as unknown as NodeJS.ProcessEnv;
-    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on' }))).toBe(false);
-    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', SMS_ALLOWED_NUMBERS: '+15555550100', NODE_ENV: 'production' }))).toBe(false);
-    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', SMS_ALLOWED_NUMBERS: '+15555550100', NODE_ENV: 'development' }))).toBe(true);
+    // Real provider: only with the test-phone allowlist.
+    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', SMS_PROVIDER: 'aws' }))).toBe(false);
+    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', SMS_PROVIDER: 'twilio' }))).toBe(false);
+    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', SMS_PROVIDER: 'aws', SMS_ALLOWED_NUMBERS: '+15555550100', NODE_ENV: 'production' }))).toBe(false);
+    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', SMS_PROVIDER: 'aws', SMS_ALLOWED_NUMBERS: '+15555550100', NODE_ENV: 'development' }))).toBe(true);
     expect(testAnyTime(e({ SMS_ALLOWED_NUMBERS: '+15555550100' }))).toBe(false);
+    // Mock provider (demos, nothing reaches a phone): 24/7 without an allowlist, never in production.
+    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', NODE_ENV: 'development' }))).toBe(true);
+    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', SMS_PROVIDER: 'mock', NODE_ENV: 'development' }))).toBe(true);
+    expect(testAnyTime(e({ SMS_TEST_ANY_TIME: 'on', NODE_ENV: 'production' }))).toBe(false);
+    expect(testAnyTime(e({ NODE_ENV: 'development' }))).toBe(false);
   });
 });
