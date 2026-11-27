@@ -89,11 +89,13 @@ Before they start, they should install an authenticator app on their phone:
 **Google Authenticator**, **Microsoft Authenticator**, or any app that "scans a QR code
 and shows 6-digit codes" (free from the App Store / Google Play).
 
-1. Open the Relay address. The Relay screen shows **Sign in** (and an **Español** button if
-   they prefer Spanish; the AWS pages will then also be in Spanish).
-2. Press **Sign in**. They're taken to the clinic's sign-in page (white and teal, showing the Rhode Island Free Clinic logo next to the Relay mark;
-   the address bar shows `…auth.us-east-2.amazoncognito.com`. That's expected; it's Amazon's
-   login service working for the clinic).
+1. Open the Relay address. It goes **straight to the clinic's sign-in page** (white and teal, showing the
+   Rhode Island Free Clinic logo next to the Relay mark; the address bar shows `…auth.us-east-2.amazoncognito.com`.
+   That's expected; it's Amazon's login service working for the clinic).
+   **Prefer Spanish?** Open `<Relay address>/login?lang=es` once (bookmark it). The sign-in pages are then in
+   Spanish, and the browser remembers it.
+2. (Relay's own screen only appears when there's something to tell them: "You have been signed out",
+   "signed out after inactivity", "no access yet", or a problem. It has a **Sign in again** button.)
 3. Enter their **email** and the **temporary password** from the email.
 4. **Choose a new password.** Rules: at least 12 characters, with an uppercase letter,
    a lowercase letter, a number and a symbol. It can't be one of their last 5 passwords.
@@ -103,7 +105,7 @@ and shows 6-digit codes" (free from the App Store / Google Play).
 6. They land on the Relay dashboard.
 
 Install the app **before** starting: each step only waits a few minutes. If a page times out
-("Something went wrong"), they go back to Relay and press **Sign in** again. If they had already
+("Something went wrong"), they open the Relay address again. If they had already
 chosen their new password, they log in with the *new* one and are shown the QR code again.
 
 **Every sign-in after that:** email → password → the current 6-digit code from the app.

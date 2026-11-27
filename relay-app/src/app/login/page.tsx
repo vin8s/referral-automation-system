@@ -1,8 +1,9 @@
-// Sign-in landing screen. Production: "Sign in" → Amazon Cognito managed login
-// (password, first-time password change, authenticator-app setup, MFA code and
-// "Forgot password" all happen on Cognito's branded pages). This page only explains
-// and shows the state the person is in: signed out, session expired, no access,
-// configuration problem. Development (AUTH_MODE=mock): pick a fake staff user.
+// Sign-in messages screen. With Cognito, signing in happens entirely on Cognito's managed
+// login page (password, first-time password change, authenticator-app setup, MFA code,
+// "Forgot password", language picker). Staff only land here when there is something to
+// say (owner decision 2026-11-27, "option 8"): signed out, session expired, no access,
+// a failed attempt, or a setup problem. Opened with nothing to say, it goes straight on
+// to the Cognito page. Development (AUTH_MODE=mock): pick a fake staff user.
 
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -42,6 +43,9 @@ export default async function LoginPage({
   const signInHref = `/api/auth/login${qs(lang === 'es' ? { lang: 'es' } : {})}`;
   const otherLangHref = `/login${qs(lang === 'es' ? {} : { lang: 'es' })}`;
 
+  // Nothing to explain (e.g. a bookmark of /login): skip this screen.
+  if (mode === 'cognito' && !notice) redirect(signInHref);
+
   return (
     <main lang={lang} style={{ flex: 1, minHeight: '100vh', display: 'grid', placeItems: 'center', padding: '32px 20px' }}>
       <div style={{ width: '100%', maxWidth: 420 }}>
@@ -79,7 +83,7 @@ export default async function LoginPage({
                   style={{ width: '100%', justifyContent: 'center', padding: '11px 14px', fontSize: 14, textDecoration: 'none' }}
                 >
                   <Icon name="shield" size={15} />
-                  {notice?.error && notice.error !== 'config' ? c.tryAgain : c.signIn}
+                  {notice?.error ? c.tryAgain : notice ? c.signInAgain : c.signIn}
                 </a>
               ) : (
                 <button type="button" className="btn btn-primary" disabled aria-disabled="true"

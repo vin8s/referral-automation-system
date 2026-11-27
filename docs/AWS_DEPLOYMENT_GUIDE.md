@@ -350,7 +350,7 @@ Follow **[docs/STAFF_LOGINS.md](STAFF_LOGINS.md)** §1: Cognito → User pools �
 then add them to group `admin` (you, clinic lead) or `ma` (medical assistants / front desk). A user in **neither**
 group can't get in. Or use the one CloudShell command in that doc.
 
-Each person then opens `AppUrl` → **Sign in** → temporary password (valid 3 days) → new password → scans the QR code
+Each person then opens `AppUrl` (it goes straight to the sign-in page) → temporary password (valid 3 days) → new password → scans the QR code
 with an authenticator app. **MFA is required for everyone**; there is no SMS option. Cognito sends these emails
 itself (from no-reply@verificationemail.com), **max 50 emails/day per AWS account**.
 
